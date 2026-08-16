@@ -1,0 +1,37 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: lylaglass-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
+  backend:
+    build:
+      context: ./backend
+    container_name: lylaglass-backend
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    ports:
+      - "4000:4000"
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      MONGODB_URI: mongodb://mongo:27017/lylaglass
+      CLIENT_ORIGIN: ${CLIENT_ORIGIN:-http://localhost:3000}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      ADMIN_SEED_EMAIL: ${ADMIN_SEED_EMAIL:-admin@lylaglass.vn}
+      ADMIN_SEED_PASSWORD: ${ADMIN_SEED_PASSWORD}
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET}
+      PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-mock}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+
+volumes:
+  mongo-data:
