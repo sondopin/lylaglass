@@ -24,11 +24,17 @@ export function createApp() {
   app.use(compression());
   app.use(pinoHttp({ logger, autoLogging: !env.isProduction }));
 
+  // Routes that carry their own, differently-shaped rate limit: the bank
+  // webhook (provider retries must not be throttled away) and the payment
+  // status poll (long-lived, high-frequency by design).
+  const SELF_LIMITED_PATHS = [/^\/api\/payments(\/|$)/, /^\/api\/orders\/[^/]+\/payment-status/];
+
   const limiter = rateLimit({
     windowMs: env.rateLimit.windowMs,
     max: env.rateLimit.max,
     standardHeaders: true,
     legacyHeaders: false,
+    skip: (req) => SELF_LIMITED_PATHS.some((pattern) => pattern.test(req.originalUrl)),
   });
   app.use("/api", limiter);
 

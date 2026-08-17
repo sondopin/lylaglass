@@ -19,6 +19,22 @@ export const orderRepository = {
   updateByOrderNumber: (orderNumber: string, data: Record<string, unknown>) =>
     OrderModel.findOneAndUpdate({ orderNumber }, data, { new: true, runValidators: true }).lean(),
 
+  /**
+   * Claims the right to return this order's reserved stock. Only the first
+   * caller gets the document back, so a retried webhook, the expiry job and an
+   * admin cancellation racing each other can never restock twice.
+   */
+  claimInventoryRelease: (id: string) =>
+    OrderModel.findOneAndUpdate({ _id: id, inventoryReleased: false }, { inventoryReleased: true }, { new: true }).lean(),
+
+  /** Same one-shot guard for giving back the coupon use counted at checkout. */
+  claimCouponUsageRelease: (id: string) =>
+    OrderModel.findOneAndUpdate(
+      { _id: id, couponUsageReleased: false, couponCode: { $ne: "" } },
+      { couponUsageReleased: true },
+      { new: true }
+    ).lean(),
+
   async list(filters: OrderListFilters) {
     const query: FilterQuery<Order> = {};
     if (filters.orderStatus) query.orderStatus = filters.orderStatus;
@@ -41,6 +57,7 @@ export const orderRepository = {
   },
 
   countAll: () => OrderModel.countDocuments(),
+
   countByStatus: (orderStatus: string) => OrderModel.countDocuments({ orderStatus }),
   sumRevenue: async () => {
     const result = await OrderModel.aggregate([
@@ -63,3 +80,10 @@ export const orderRepository = {
       { $sort: { _id: 1 } },
     ]),
 };
+
+/**
+ * An order as this repository hands it out: a lean plain object, so Mongoose
+ * Maps are already flattened. Services should use this rather than the raw
+ * schema type, which describes a hydrated document instead.
+ */
+export type OrderRecord = NonNullable<Awaited<ReturnType<typeof orderRepository.findById>>>;

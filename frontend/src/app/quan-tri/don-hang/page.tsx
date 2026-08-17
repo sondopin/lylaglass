@@ -57,9 +57,9 @@ export default function AdminOrdersPage() {
                   </Link>
                 </td>
                 <td className="px-4 py-3">
-                  {order.customer.name}
+                  {order.customer?.name ?? "—"}
                   <br />
-                  <span className="text-xs text-muted-foreground">{order.customer.email}</span>
+                  <span className="text-xs text-muted-foreground">{order.customer?.email ?? ""}</span>
                 </td>
                 <td className="px-4 py-3">
                   <StatusBadge status={order.paymentStatus} />

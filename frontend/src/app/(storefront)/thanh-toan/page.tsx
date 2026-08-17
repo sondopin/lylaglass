@@ -18,7 +18,6 @@ import { formatVnd } from "@/lib/format";
 import { checkoutApi } from "@/lib/api/checkout";
 import { couponsApi, CouponEvaluation } from "@/lib/api/coupons";
 import { ApiClientError } from "@/lib/api/client";
-import { cn } from "@/lib/utils";
 
 const checkoutSchema = z.object({
   name: z.string().min(1, "Vui lòng nhập họ tên"),
@@ -30,14 +29,12 @@ const checkoutSchema = z.object({
   district: z.string().optional(),
   province: z.string().min(1, "Vui lòng nhập tỉnh/thành phố"),
   customerNote: z.string().optional(),
-  paymentMethod: z.enum(["cod", "mock"]),
 });
 type CheckoutValues = z.infer<typeof checkoutSchema>;
 
 export default function CheckoutPage() {
   const router = useRouter();
   const items = useCartStore((s) => s.items);
-  const clear = useCartStore((s) => s.clear);
   const subtotal = cartSubtotal(items);
 
   const [couponCode, setCouponCode] = useState("");
@@ -56,7 +53,6 @@ export default function CheckoutPage() {
       district: "",
       province: "",
       customerNote: "",
-      paymentMethod: "cod",
     },
   });
 
@@ -89,16 +85,16 @@ export default function CheckoutPage() {
         items: items.map((i) => ({ productId: i.productId, sku: i.sku, quantity: i.quantity })),
         couponCode: coupon?.code,
         customerNote: values.customerNote,
-        paymentMethod: values.paymentMethod,
+        paymentMethod: "bank_transfer",
       }),
     onSuccess: (result) => {
-      clear();
-      if (result.redirectUrl) {
-        const sep = result.redirectUrl.includes("?") ? "&" : "?";
-        router.push(`${result.redirectUrl}${sep}email=${encodeURIComponent(result.order.customer.email)}`);
-      } else {
-        router.push(`/don-hang/${result.order.orderNumber}?email=${encodeURIComponent(result.order.customer.email)}`);
-      }
+      // The cart is deliberately NOT cleared here: no money has moved yet. A
+      // customer who backs out of the QR screen must still find their cart
+      // intact. It is cleared on the payment page once the backend confirms the
+      // transfer arrived.
+      router.push(
+        `/thanh-toan/${result.order.orderNumber}?email=${encodeURIComponent(result.order.customer.email)}`
+      );
     },
     onError: (err) => {
       toast.error(err instanceof ApiClientError ? err.message : "Đặt hàng thất bại, vui lòng thử lại");
@@ -258,39 +254,13 @@ export default function CheckoutPage() {
 
             <section>
               <h2 className="mb-4 font-heading text-lg font-medium">Phương thức thanh toán</h2>
-              <FormField
-                control={form.control}
-                name="paymentMethod"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormControl>
-                      <div className="flex flex-col gap-2">
-                        {[
-                          { value: "cod", label: "Thanh toán khi nhận hàng (COD)" },
-                          { value: "mock", label: "Thanh toán online (thẻ / ví điện tử)" },
-                        ].map((opt) => (
-                          <label
-                            key={opt.value}
-                            className={cn(
-                              "flex cursor-pointer items-center gap-3 rounded-xl border border-border px-4 py-3 text-sm",
-                              field.value === opt.value && "border-foreground"
-                            )}
-                          >
-                            <input
-                              type="radio"
-                              name="paymentMethod"
-                              value={opt.value}
-                              checked={field.value === opt.value}
-                              onChange={() => field.onChange(opt.value)}
-                            />
-                            {opt.label}
-                          </label>
-                        ))}
-                      </div>
-                    </FormControl>
-                  </FormItem>
-                )}
-              />
+              <div className="rounded-xl border border-foreground px-4 py-3.5">
+                <p className="text-sm font-medium">Chuyển khoản ngân hàng (VietQR)</p>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                  Sau khi đặt hàng, bạn sẽ nhận được mã VietQR kèm thông tin chuyển khoản. Đơn hàng được xác nhận tự
+                  động ngay khi chúng tôi nhận được tiền.
+                </p>
+              </div>
             </section>
           </form>
         </Form>
@@ -359,7 +329,7 @@ export default function CheckoutPage() {
             className="mt-5 w-full rounded-full"
             disabled={submitOrder.isPending}
           >
-            {submitOrder.isPending ? "Đang xử lý..." : "Đặt hàng"}
+            {submitOrder.isPending ? "Đang xử lý..." : "Đặt hàng & lấy mã VietQR"}
           </Button>
         </aside>
       </div>

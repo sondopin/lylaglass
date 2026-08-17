@@ -4,13 +4,14 @@ import { ApiError } from "@/utils/ApiError";
 import { generateOrderNumber } from "@/utils/orderNumber";
 import { productRepository } from "@/repositories/product.repository";
 import { orderRepository } from "@/repositories/order.repository";
-import { paymentRepository } from "@/repositories/payment.repository";
 import { customerRepository } from "@/repositories/customer.repository";
 import { couponRepository } from "@/repositories/coupon.repository";
 import { evaluateCoupon } from "./coupon.service";
 import { calculateShippingFee } from "./shipping.service";
-import { getPaymentProvider } from "@/payments";
+import { createPaymentForOrder, toPublicPaymentView } from "./payment.service";
+import { releaseOrderReservations } from "./order.service";
 import { createCheckoutSchema } from "@/validators/order.validators";
+import { Order } from "@/models/Order.model";
 import { logger } from "@/config/logger";
 
 type CheckoutInput = z.infer<typeof createCheckoutSchema>;
@@ -100,6 +101,10 @@ export async function processCheckout(input: CheckoutInput) {
     reserved.push({ productId: item.productId, sku: item.sku, quantity: item.quantity });
   }
 
+  // Tracked so a failure *after* the order exists unwinds through the guarded
+  // release path (which flags the order) instead of restocking behind its back.
+  let createdOrder: Order | null = null;
+
   try {
     const subtotal = lineItems.reduce((sum, item) => sum + item.lineTotal, 0);
 
@@ -117,7 +122,6 @@ export async function processCheckout(input: CheckoutInput) {
     const total = Math.max(subtotal - discountTotal + shippingFee, 0);
 
     const orderNumber = generateOrderNumber();
-    const isCod = input.paymentMethod === "cod";
 
     const order = await orderRepository.create({
       orderNumber,
@@ -131,11 +135,20 @@ export async function processCheckout(input: CheckoutInput) {
       couponCode,
       total,
       customerNote: input.customerNote ?? "",
-      paymentMethod: input.paymentMethod,
+      paymentMethod: "bank_transfer",
       paymentStatus: "pending",
-      orderStatus: isCod ? "confirmed" : "pending",
+      // Stays pending until an incoming bank transfer is verified server-side.
+      orderStatus: "pending",
       shippingStatus: "unfulfilled",
     });
+    createdOrder = order.toObject() as Order;
+
+    // Charged immediately after the order exists, so the compensating release
+    // below can always tell whether a use needs giving back.
+    if (couponCode) {
+      const coupon = await couponRepository.findByCode(couponCode);
+      if (coupon) await couponRepository.incrementUsage(String(coupon._id));
+    }
 
     await customerRepository.upsertFromOrder({
       name: input.customer.name,
@@ -144,42 +157,30 @@ export async function processCheckout(input: CheckoutInput) {
       orderTotal: total,
     });
 
-    if (couponCode) {
-      const coupon = await couponRepository.findByCode(couponCode);
-      if (coupon) await couponRepository.incrementUsage(String(coupon._id));
-    }
-
-    // COD never touches an external payment gateway — nothing to verify server-side beyond delivery.
-    if (isCod) {
-      return { order: order.toObject(), payment: null, redirectUrl: null };
-    }
-
-    const provider = getPaymentProvider();
-    const intent = await provider.createPaymentIntent({
-      orderId: String(order._id),
-      orderNumber: order.orderNumber,
-      amount: total,
-      currency: "VND",
-      customerEmail: input.customer.email,
-    });
-
-    const payment = await paymentRepository.create({
-      orderId: order._id,
-      provider: provider.name,
-      intentId: intent.intentId,
-      idempotencyKey: `checkout_${order._id}`,
-      amount: total,
-      currency: "VND",
-      status: intent.status,
-    });
+    // Create the payment + VietQR the customer will transfer against. Scanning
+    // that QR proves nothing — the order only becomes paid once an incoming
+    // transfer is verified through the bank webhook.
+    const { payment, qrCodeDataUrl } = await createPaymentForOrder(createdOrder);
 
     const updatedOrder = await orderRepository.updateById(String(order._id), { paymentId: payment._id });
 
-    return { order: updatedOrder, payment, redirectUrl: intent.redirectUrl ?? null };
+    return {
+      order: updatedOrder,
+      payment: { ...toPublicPaymentView(payment), qrCodeDataUrl },
+    };
   } catch (err) {
-    // Any failure after stock was reserved but before the order is durably
-    // recorded must give the stock back.
-    await releaseReservedStock(reserved);
+    // Any failure after stock was reserved must give the stock back.
+    if (createdOrder) {
+      // The order is already persisted, so unwind it the same way an expired
+      // payment does — cancelled, and released exactly once.
+      await orderRepository.updateById(String(createdOrder._id), {
+        paymentStatus: "failed",
+        orderStatus: "cancelled",
+      });
+      await releaseOrderReservations(createdOrder);
+    } else {
+      await releaseReservedStock(reserved);
+    }
     throw err;
   }
 }

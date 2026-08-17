@@ -100,6 +100,99 @@ export type PaymentStatus = "pending" | "paid" | "failed" | "refunded";
 export type OrderStatus = "pending" | "confirmed" | "processing" | "completed" | "cancelled";
 export type ShippingStatus = "unfulfilled" | "processing" | "shipped" | "delivered" | "returned";
 
+/** Bank transfer is the only payment method on the storefront. */
+export type PaymentMethod = "bank_transfer";
+
+/** Lifecycle of the payment record itself, as reported by the backend. */
+export type PaymentRecordStatus =
+  | "requires_action"
+  | "processing"
+  | "succeeded"
+  | "failed"
+  | "expired"
+  | "refunded";
+
+/**
+ * Everything the storefront needs to display a VietQR transfer. Produced
+ * entirely server-side — the client never computes an amount, payment code or
+ * account number, and never decides that a payment succeeded.
+ */
+export interface PaymentView {
+  id: string;
+  provider: string;
+  method: PaymentMethod;
+  status: PaymentRecordStatus;
+  amount: number;
+  currency: string;
+  paymentCode: string;
+  bank: {
+    code: string;
+    name: string;
+    accountNumber: string;
+    accountName: string;
+  };
+  qrPayload: string;
+  /** PNG data URI, only populated when the QR was requested. */
+  qrCodeDataUrl: string;
+  expiresAt: string;
+  paidAt: string | null;
+  createdAt: string;
+}
+
+export interface PaymentStatusResult {
+  order: {
+    orderNumber: string;
+    email: string;
+    total: number;
+    currency: string;
+    paymentStatus: PaymentStatus;
+    orderStatus: OrderStatus;
+    createdAt: string;
+  };
+  payment: PaymentView;
+}
+
+/** Admin-only view of the payment behind an order, used for reconciliation. */
+export interface AdminPayment extends PaymentView {
+  transactionId?: string;
+  referenceCode?: string;
+  transactionDate?: string;
+  transferredAmount?: number;
+  needsManualReview?: boolean;
+  manualReviewReason?: string;
+  failureReason?: string;
+  confirmationEmailStatus?: "pending" | "sending" | "sent" | "failed";
+  confirmationEmailSentAt?: string;
+  confirmationEmailError?: string;
+  /** "New paid order" alert to the shop; "skipped" = no recipient configured. */
+  ownerNotificationStatus?: "pending" | "sending" | "sent" | "failed" | "skipped";
+  ownerNotificationSentAt?: string;
+  ownerNotificationError?: string;
+  bankBin?: string;
+  bankCode?: string;
+  bankName?: string;
+  bankAccountNumber?: string;
+  bankAccountName?: string;
+}
+
+/** One incoming transfer the bank notification provider told us about. */
+export interface BankTransaction {
+  _id: string;
+  provider: string;
+  providerTransactionId: string;
+  gateway: string;
+  accountNumber: string;
+  transferType: "in" | "out";
+  transferAmount: number;
+  code: string;
+  content: string;
+  referenceCode: string;
+  transactionDate?: string;
+  matchStatus: "matched" | "unmatched" | "rejected" | "ignored";
+  matchNote?: string;
+  createdAt: string;
+}
+
 export interface Order {
   _id: string;
   orderNumber: string;
@@ -114,7 +207,7 @@ export interface Order {
   total: number;
   currency: string;
   customerNote?: string;
-  paymentMethod: "cod" | "card" | "bank_transfer" | "mock";
+  paymentMethod: PaymentMethod;
   paymentStatus: PaymentStatus;
   orderStatus: OrderStatus;
   shippingStatus: ShippingStatus;
@@ -122,6 +215,11 @@ export interface Order {
   trackingNumber?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/** An order plus its payment record — what the admin order detail endpoint returns. */
+export interface OrderWithPayment extends Order {
+  payment: AdminPayment | null;
 }
 
 export interface Review {

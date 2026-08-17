@@ -11,6 +11,10 @@ type SearchParams = Promise<{ email?: string }>;
 
 export const metadata: Metadata = { robots: { index: false } };
 
+// Payment and fulfilment state change out-of-band (bank webhook, admin), so this
+// page must never be prerendered or served from a cached render.
+export const dynamic = "force-dynamic";
+
 const ORDER_STATUS_LABEL: Record<string, string> = {
   pending: "Chờ xác nhận",
   confirmed: "Đã xác nhận",
@@ -23,6 +27,9 @@ const PAYMENT_STATUS_LABEL: Record<string, string> = {
   paid: "Đã thanh toán",
   failed: "Thanh toán thất bại",
   refunded: "Đã hoàn tiền",
+};
+const PAYMENT_METHOD_LABEL: Record<string, string> = {
+  bank_transfer: "Chuyển khoản ngân hàng (VietQR)",
 };
 const SHIPPING_STATUS_LABEL: Record<string, string> = {
   unfulfilled: "Chưa giao",
@@ -68,12 +75,34 @@ export default async function OrderConfirmationPage({ params, searchParams }: { 
   return (
     <div className="container-lyla max-w-3xl py-14">
       <div className="text-center">
-        <p className="text-xs font-semibold tracking-widest text-emerald-600 uppercase">Đặt hàng thành công</p>
+        {order.paymentStatus === "paid" ? (
+          <p className="text-xs font-semibold tracking-widest text-emerald-600 uppercase">
+            Đã thanh toán · Đã xác nhận đơn hàng
+          </p>
+        ) : order.paymentStatus === "pending" ? (
+          <p className="text-xs font-semibold tracking-widest text-amber-600 uppercase">Chờ thanh toán</p>
+        ) : (
+          <p className="text-xs font-semibold tracking-widest text-destructive uppercase">
+            {PAYMENT_STATUS_LABEL[order.paymentStatus]}
+          </p>
+        )}
         <h1 className="mt-2 font-heading text-3xl font-medium">Cảm ơn bạn đã mua sắm tại LylaGlass!</h1>
         <p className="mt-2 text-sm text-muted-foreground">
           Mã đơn hàng <span className="font-medium text-foreground">{order.orderNumber}</span> — đặt lúc{" "}
           {formatDateTime(order.createdAt)}
         </p>
+
+        {order.paymentStatus === "pending" && order.orderStatus !== "cancelled" && (
+          <div className="mt-5 inline-flex flex-col items-center gap-2 rounded-2xl bg-mint-light px-6 py-4">
+            <p className="text-sm">Đơn hàng đang chờ bạn chuyển khoản qua VietQR.</p>
+            <Button
+              className="rounded-full"
+              render={<Link href={`/thanh-toan/${order.orderNumber}?email=${encodeURIComponent(email)}`} />}
+            >
+              Tiếp tục thanh toán
+            </Button>
+          </div>
+        )}
       </div>
 
       <div className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -84,6 +113,9 @@ export default async function OrderConfirmationPage({ params, searchParams }: { 
         <div className="rounded-xl bg-muted p-4 text-center">
           <p className="text-xs text-muted-foreground">Thanh toán</p>
           <p className="mt-1 text-sm font-medium">{PAYMENT_STATUS_LABEL[order.paymentStatus]}</p>
+          <p className="text-xs text-muted-foreground">
+            {PAYMENT_METHOD_LABEL[order.paymentMethod] ?? order.paymentMethod}
+          </p>
         </div>
         <div className="rounded-xl bg-muted p-4 text-center">
           <p className="text-xs text-muted-foreground">Vận chuyển</p>

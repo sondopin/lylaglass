@@ -15,6 +15,32 @@ import { ApiClientError } from "@/lib/api/client";
 const ORDER_STATUSES = ["pending", "confirmed", "processing", "completed", "cancelled"];
 const SHIPPING_STATUSES = ["unfulfilled", "processing", "shipped", "delivered", "returned"];
 
+const PAYMENT_RECORD_STATUS_LABEL: Record<string, string> = {
+  requires_action: "Chờ chuyển khoản",
+  processing: "Đang xử lý",
+  succeeded: "Đã thanh toán",
+  failed: "Thất bại",
+  expired: "Hết hạn",
+  refunded: "Đã hoàn tiền",
+};
+
+const EMAIL_STATUS_LABEL: Record<string, string> = {
+  pending: "Chưa gửi",
+  sending: "Đang gửi",
+  sent: "Đã gửi",
+  failed: "Gửi thất bại",
+  skipped: "Chưa cấu hình người nhận",
+};
+
+function PaymentRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-start justify-between gap-3 border-b border-border/60 py-2 last:border-0">
+      <span className="shrink-0 text-xs text-muted-foreground">{label}</span>
+      <span className="text-right text-sm break-all">{value}</span>
+    </div>
+  );
+}
+
 export default function AdminOrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const token = useAdminAuthStore((s) => s.token);
@@ -67,7 +93,9 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
           <div className="rounded-2xl border border-border p-5">
             <h2 className="mb-3 font-heading text-lg font-medium">Sản phẩm</h2>
             <ul className="flex flex-col divide-y divide-border">
-              {order.items.map((item) => (
+              {/* Orders written by an older schema can be missing items entirely;
+                  render what exists instead of crashing the whole page. */}
+              {(order.items ?? []).map((item) => (
                 <li key={item.sku} className="flex items-center gap-3 py-3">
                   <div className="relative size-14 shrink-0 overflow-hidden rounded-lg bg-muted">
                     {item.image && <Image src={item.image} alt={item.productName} fill sizes="56px" className="object-cover" />}
@@ -107,15 +135,20 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 text-sm">
               <div>
                 <p className="text-xs text-muted-foreground">Khách hàng</p>
-                <p>{order.customer.name}</p>
-                <p className="text-muted-foreground">{order.customer.email}</p>
-                <p className="text-muted-foreground">{order.customer.phone}</p>
+                <p>{order.customer?.name ?? "—"}</p>
+                <p className="text-muted-foreground">{order.customer?.email ?? ""}</p>
+                <p className="text-muted-foreground">{order.customer?.phone ?? ""}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Địa chỉ giao hàng</p>
-                <p>{order.shippingAddress.fullName}</p>
+                <p>{order.shippingAddress?.fullName ?? "—"}</p>
                 <p className="text-muted-foreground">
-                  {[order.shippingAddress.line1, order.shippingAddress.ward, order.shippingAddress.district, order.shippingAddress.province]
+                  {[
+                    order.shippingAddress?.line1,
+                    order.shippingAddress?.ward,
+                    order.shippingAddress?.district,
+                    order.shippingAddress?.province,
+                  ]
                     .filter(Boolean)
                     .join(", ")}
                 </p>
@@ -126,6 +159,81 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
                 <p className="text-xs text-muted-foreground">Ghi chú của khách</p>
                 <p className="text-sm">{order.customerNote}</p>
               </div>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-border p-5">
+            <h2 className="mb-3 font-heading text-lg font-medium">Thanh toán</h2>
+            {order.payment ? (
+              <>
+                {order.payment.needsManualReview && (
+                  <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    <p className="font-medium">Cần đối soát thủ công</p>
+                    <p className="mt-0.5 text-xs">{order.payment.manualReviewReason}</p>
+                  </div>
+                )}
+                <PaymentRow
+                  label="Phương thức"
+                  value={`VietQR / Chuyển khoản ${order.payment.bankName ?? ""}`.trim()}
+                />
+                <PaymentRow
+                  label="Trạng thái"
+                  value={PAYMENT_RECORD_STATUS_LABEL[order.payment.status] ?? order.payment.status}
+                />
+                <PaymentRow label="Mã thanh toán" value={order.payment.paymentCode} />
+                <PaymentRow label="Số tiền cần thu" value={formatVnd(order.payment.amount)} />
+                <PaymentRow
+                  label="Số tiền đã nhận"
+                  value={
+                    order.payment.transferredAmount != null ? formatVnd(order.payment.transferredAmount) : "Chưa nhận"
+                  }
+                />
+                <PaymentRow label="Tài khoản nhận" value={order.payment.bankAccountNumber ?? "—"} />
+                <PaymentRow label="Mã giao dịch ngân hàng" value={order.payment.transactionId ?? "—"} />
+                <PaymentRow label="Reference code" value={order.payment.referenceCode || "—"} />
+                <PaymentRow
+                  label="Thời gian giao dịch"
+                  value={order.payment.transactionDate ? formatDateTime(order.payment.transactionDate) : "—"}
+                />
+                <PaymentRow label="Tạo lúc" value={formatDateTime(order.payment.createdAt)} />
+                <PaymentRow label="Hết hạn lúc" value={formatDateTime(order.payment.expiresAt)} />
+                <PaymentRow
+                  label="Thanh toán lúc"
+                  value={order.payment.paidAt ? formatDateTime(order.payment.paidAt) : "—"}
+                />
+                <PaymentRow
+                  label="Email cho khách"
+                  value={
+                    <>
+                      {EMAIL_STATUS_LABEL[order.payment.confirmationEmailStatus ?? "pending"]}
+                      {order.payment.confirmationEmailSentAt &&
+                        ` · ${formatDateTime(order.payment.confirmationEmailSentAt)}`}
+                      {order.payment.confirmationEmailError && (
+                        <span className="block text-xs text-destructive">{order.payment.confirmationEmailError}</span>
+                      )}
+                    </>
+                  }
+                />
+                <PaymentRow
+                  label="Email thông báo cho shop"
+                  value={
+                    <>
+                      {EMAIL_STATUS_LABEL[order.payment.ownerNotificationStatus ?? "pending"]}
+                      {order.payment.ownerNotificationSentAt &&
+                        ` · ${formatDateTime(order.payment.ownerNotificationSentAt)}`}
+                      {order.payment.ownerNotificationError &&
+                        order.payment.ownerNotificationStatus === "failed" && (
+                          <span className="block text-xs text-destructive">{order.payment.ownerNotificationError}</span>
+                        )}
+                    </>
+                  }
+                />
+                {order.payment.failureReason && (
+                  <PaymentRow label="Lý do thất bại" value={order.payment.failureReason} />
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">Đơn hàng này chưa có giao dịch thanh toán.</p>
             )}
           </div>
         </div>

@@ -63,7 +63,8 @@ const orderSchema = new Schema(
 
     customerNote: { type: String, default: "" },
 
-    paymentMethod: { type: String, enum: ["cod", "card", "bank_transfer", "mock"], default: "cod" },
+    // VietQR bank transfer is the only storefront payment method.
+    paymentMethod: { type: String, enum: ["bank_transfer"], default: "bank_transfer" },
     paymentId: { type: Schema.Types.ObjectId, ref: "Payment" },
     paymentStatus: {
       type: String,
@@ -89,6 +90,9 @@ const orderSchema = new Schema(
     trackingNumber: { type: String, default: "" },
 
     inventoryReleased: { type: Boolean, default: false }, // true once stock was returned for a cancelled order
+    // Coupon usage is counted at checkout, so an unpaid/cancelled order has to
+    // give that use back. Flagged separately from stock so neither can run twice.
+    couponUsageReleased: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

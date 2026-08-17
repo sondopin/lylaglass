@@ -1,22 +1,50 @@
 import { env } from "@/config/env";
 import { PaymentProvider } from "./PaymentProvider";
-import { MockPaymentProvider } from "./MockPaymentProvider";
-import { StripePaymentProvider } from "./StripePaymentProvider";
+import { BankNotificationProvider } from "./BankNotificationProvider";
+import { VietQRPaymentProvider } from "./VietQRPaymentProvider";
+import { SePayBankNotificationProvider } from "./SePayBankNotificationProvider";
 
-let provider: PaymentProvider | null = null;
+let paymentProvider: PaymentProvider | null = null;
+let bankNotificationProvider: BankNotificationProvider | null = null;
 
+/** Creates payment instructions (the VietQR the customer transfers against). */
 export function getPaymentProvider(): PaymentProvider {
-  if (provider) return provider;
+  if (paymentProvider) return paymentProvider;
 
   switch (env.payment.provider) {
-    case "stripe":
-      provider = new StripePaymentProvider(env.payment.stripeSecretKey, env.payment.stripeWebhookSecret);
-      break;
-    case "mock":
+    case "vietqr":
     default:
-      provider = new MockPaymentProvider();
+      paymentProvider = new VietQRPaymentProvider({
+        bin: env.payment.vietqr.bankBin,
+        code: env.payment.vietqr.bankCode,
+        name: env.payment.vietqr.bankName,
+        accountNumber: env.payment.vietqr.accountNumber,
+        accountName: env.payment.vietqr.accountName,
+      });
   }
-  return provider;
+  return paymentProvider;
+}
+
+/**
+ * Confirms money actually arrived in the shop's bank account. Deliberately a
+ * separate registry from the payment provider: the QR vendor and the
+ * balance-notification vendor are independent choices.
+ */
+export function getBankNotificationProvider(): BankNotificationProvider {
+  if (bankNotificationProvider) return bankNotificationProvider;
+
+  switch (env.payment.bankWebhook.provider) {
+    case "sepay":
+    default:
+      bankNotificationProvider = new SePayBankNotificationProvider({
+        mode: env.payment.bankWebhook.authMode,
+        secret: env.payment.bankWebhook.secret,
+        apiKey: env.payment.bankWebhook.apiKey,
+        timestampToleranceSeconds: env.payment.bankWebhook.timestampToleranceSeconds,
+      });
+  }
+  return bankNotificationProvider;
 }
 
 export * from "./PaymentProvider";
+export * from "./BankNotificationProvider";

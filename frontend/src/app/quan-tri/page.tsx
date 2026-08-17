@@ -57,7 +57,9 @@ export default function AdminDashboardPage() {
                       {order.orderNumber}
                     </Link>
                   </td>
-                  <td className="px-4 py-3">{order.customer.name}</td>
+                  {/* Guarded: an order written by an older schema may have no
+                      customer block, and one bad row must not blank the page. */}
+                  <td className="px-4 py-3">{order.customer?.name ?? "—"}</td>
                   <td className="px-4 py-3">
                     <StatusBadge status={order.paymentStatus} />
                   </td>

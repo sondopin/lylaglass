@@ -1,6 +1,17 @@
 import { apiClient } from "./client";
 import { toQueryString } from "./query-string";
-import { AdminUser, Category, Coupon, Customer, DashboardStats, Order, Product, Settings } from "./types";
+import {
+  AdminUser,
+  BankTransaction,
+  Category,
+  Coupon,
+  Customer,
+  DashboardStats,
+  Order,
+  OrderWithPayment,
+  Product,
+  Settings,
+} from "./types";
 
 export const adminApi = {
   login: (email: string, password: string) =>
@@ -44,7 +55,7 @@ export const adminApi = {
   orders: {
     list: (token: string, filters: Record<string, string | number | undefined> = {}) =>
       apiClient.getPaginated<Order>(`/orders/admin/all${toQueryString(filters)}`, { token }),
-    get: (token: string, id: string) => apiClient.get<Order>(`/orders/admin/${id}`, { token }),
+    get: (token: string, id: string) => apiClient.get<OrderWithPayment>(`/orders/admin/${id}`, { token }),
     updateStatus: (token: string, id: string, data: Record<string, unknown>) =>
       apiClient.patch<Order>(`/orders/admin/${id}/status`, data, { token }),
     cancel: (token: string, id: string) => apiClient.post<Order>(`/orders/admin/${id}/cancel`, undefined, { token }),
@@ -53,6 +64,15 @@ export const adminApi = {
   customers: {
     list: (token: string, filters: Record<string, string | number | undefined> = {}) =>
       apiClient.getPaginated<Customer>(`/customers/admin/all${toQueryString(filters)}`, { token }),
+  },
+
+  /** Incoming bank transfers reported by the notification provider (SePay). */
+  bankTransactions: {
+    list: (token: string, filters: Record<string, string | number | undefined> = {}) =>
+      apiClient.getPaginated<BankTransaction>(`/payments/admin/bank-transactions${toQueryString(filters)}`, {
+        token,
+        cache: "no-store",
+      }),
   },
 
   coupons: {

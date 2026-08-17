@@ -1,0 +1,500 @@
+================================================================================
+ LYLAGLASS - HƯỚNG DẪN SETUP & TEST LUỒNG THANH TOÁN THẬT
+ VietQR -> TPBank -> SePay webhook -> Order confirmed -> Email
+================================================================================
+
+Đọc trước 30 giây:
+
+  VietQR chỉ TẠO MÃ QR. Việc xác nhận đã thanh toán dựa trên GIAO DỊCH TIỀN VÀO
+  tài khoản TPBank, do SePay gửi webhook về backend. Khách quét QR không phải là
+  đã trả tiền.
+
+  Vậy nên để test luồng thật, bạn cần 3 thứ:
+    1. Tài khoản TPBank thật (để nhận tiền)
+    2. Tài khoản SePay đã liên kết TPBank (để bắn webhook khi tiền vào)
+    3. Một URL public HTTPS trỏ về backend đang chạy (SePay phải gọi được vào)
+  Email là phần thứ 4, có thể bật sau.
+
+  Tổng thời gian: khoảng 30-60 phút (chờ SePay duyệt liên kết bank có thể lâu hơn).
+
+
+================================================================================
+ PHẦN 0 - CHUẨN BỊ
+================================================================================
+
+Cần có sẵn:
+  [ ] Tài khoản TPBank (cá nhân hoặc doanh nghiệp đều được), đã bật Internet
+      Banking / app TPBank Mobile.
+  [ ] Số điện thoại + email để đăng ký SePay.
+  [ ] MongoDB đang chạy (docker compose up -d mongo).
+  [ ] Node.js đã cài, project đã npm install ở cả backend/ và frontend/.
+  [ ] Một chút tiền thật trong tài khoản khác để chuyển thử (chuyển từ tài khoản
+      A sang tài khoản TPBank của shop). Có thể test với 2.000đ - 5.000đ.
+
+LƯU Ý QUAN TRỌNG VỀ SỐ TIỀN:
+  Hệ thống chỉ xác nhận khi số tiền chuyển ĐÚNG BẰNG tổng đơn hàng. Không thể
+  chuyển 2.000đ cho đơn 208.000đ. Nên trước khi test, hãy tạo 1 sản phẩm giá rẻ
+  (xem PHẦN 6, bước 6.2) để tổng đơn chỉ khoảng 2.000đ - 5.000đ.
+
+
+================================================================================
+ PHẦN 1 - TÀI KHOẢN TPBANK
+================================================================================
+
+1.1. Nếu chưa có: mở tài khoản TPBank (app TPBank Mobile hoặc tại quầy).
+
+1.2. Ghi lại chính xác 2 thông tin sau, sẽ dùng ở PHẦN 5:
+       - SỐ TÀI KHOẢN (chỉ số, không dấu cách)          -> VIETQR_ACCOUNT_NUMBER
+       - TÊN CHỦ TÀI KHOẢN (in hoa, không dấu, đúng như  -> VIETQR_ACCOUNT_NAME
+         ngân hàng ghi, ví dụ: NGUYEN VAN SON)
+
+1.3. Kiểm tra nhanh số tài khoản có đúng không: mở app ngân hàng bất kỳ, thử
+     chuyển khoản tới số đó (chưa cần bấm xác nhận), xem tên hiện lên có khớp.
+
+     Sai số tài khoản = QR sinh ra sai = tiền vào tài khoản người khác.
+     Kiểm tra kỹ bước này.
+
+
+================================================================================
+ PHẦN 2 - TÀI KHOẢN SEPAY + LIÊN KẾT TPBANK
+================================================================================
+
+SePay là dịch vụ đọc biến động số dư tài khoản ngân hàng rồi bắn webhook.
+SePay KHÔNG giữ tiền của bạn - tiền về trực tiếp tài khoản TPBank.
+
+2.1. Vào https://sepay.vn -> Đăng ký tài khoản -> xác thực email/SĐT.
+
+2.2. Xem bảng giá: https://sepay.vn/bang-gia.html
+     (Có gói miễn phí/dùng thử để test; chọn gói phù hợp.)
+
+2.3. Trong dashboard SePay, vào phần quản lý tài khoản ngân hàng
+     (thường là "Tài khoản ngân hàng" / "Bank Accounts") -> Thêm/Liên kết
+     -> chọn TPBank.
+
+     SePay có hợp tác chính thức với TPBank nên liên kết được online.
+     Làm theo hướng dẫn trên màn hình (đăng nhập TPBank / cấp quyền API Banking).
+
+     Tài liệu chính thức nếu bí:
+       https://developer.sepay.vn/vi/sepay-webhooks/tai-khoan-ngan-hang
+       https://sepay.vn/blog/api-tpbank-api-ngan-hang-tpbank-moi-nhat/
+
+2.4. Sau khi liên kết xong, thử chuyển 2.000đ vào tài khoản TPBank đó và kiểm
+     tra xem giao dịch có hiện trong dashboard SePay không.
+
+     >>> ĐỪNG LÀM TIẾP nếu bước này chưa hiện giao dịch. Nếu SePay chưa thấy
+         giao dịch thì webhook cũng sẽ không bao giờ về.
+
+
+================================================================================
+ PHẦN 3 - MỞ ĐƯỜNG CHO SEPAY GỌI VÀO BACKEND (ngrok)
+================================================================================
+
+SePay gọi từ internet vào backend của bạn. localhost:4000 thì SePay không thấy.
+Khi test ở máy local, dùng ngrok để tạo URL public HTTPS.
+
+3.1. Tải ngrok: https://ngrok.com/download -> đăng ký lấy authtoken.
+
+3.2. Cấu hình 1 lần:
+       ngrok config add-authtoken <AUTHTOKEN_CỦA_BẠN>
+
+3.3. Chạy backend trước (PHẦN 6), rồi mở 1 cửa sổ terminal RIÊNG và chạy:
+       ngrok http 4000
+
+3.4. Ngrok in ra dòng dạng:
+       Forwarding  https://abcd-1234.ngrok-free.app -> http://localhost:4000
+
+     URL WEBHOOK của bạn = URL đó + /api/payments/bank-webhook
+     Ví dụ:
+       https://abcd-1234.ngrok-free.app/api/payments/bank-webhook
+
+     LƯU Ý: URL ngrok free đổi mỗi lần chạy lại -> phải cập nhật lại webhook
+     trong SePay. Khi deploy production thì dùng domain thật, cố định.
+
+3.5. (Khuyến nghị) Set thêm trong backend/.env để link trong email đúng:
+       API_BASE_URL=https://abcd-1234.ngrok-free.app
+
+
+================================================================================
+ PHẦN 4 - TẠO WEBHOOK TRONG SEPAY + LẤY SECRET
+================================================================================
+
+4.1. Trong dashboard SePay, vào phần "Webhooks" -> Thêm webhook mới.
+
+4.2. Điền:
+       - URL              : https://abcd-1234.ngrok-free.app/api/payments/bank-webhook
+       - Tài khoản NH     : chọn tài khoản TPBank vừa liên kết
+       - Loại giao dịch   : CHỈ TIỀN VÀO  (money in / incoming only)
+       - Kiểu xác thực    : HMAC-SHA256   <-- khuyến nghị
+       - (nếu có) Content-Type: application/json
+
+4.3. SePay sẽ cho bạn một SECRET KEY của webhook. COPY NGAY, dán vào chỗ tạm.
+     Đây là giá trị cho BANK_WEBHOOK_SECRET ở PHẦN 5.
+
+     Nếu SePay chỉ cho chọn kiểu API Key (không có HMAC), thì:
+       - copy API Key đó
+       - ở .env dùng: BANK_WEBHOOK_AUTH_MODE=apikey
+                      BANK_WEBHOOK_API_KEY=<api key vừa copy>
+       - để trống BANK_WEBHOOK_SECRET
+
+4.4. Tài liệu tham chiếu (nếu tên menu khác với hướng dẫn này):
+       https://docs.sepay.vn/tich-hop-webhooks.html
+       https://developer.sepay.vn/vi/sepay-webhooks/xac-thuc
+
+4.5. Backend đã được viết đúng theo chuẩn SePay:
+       - nhận POST JSON, verify chữ ký trên raw body
+       - trả về đúng 200 + {"success": true}
+       - chống webhook trùng bằng field "id" của giao dịch
+     Nên không cần chỉnh gì thêm ở code.
+
+
+================================================================================
+ PHẦN 5 - ĐIỀN backend/.env
+================================================================================
+
+Mở file: backend/.env
+Thay các dòng sau bằng giá trị THẬT (đang là giá trị dev giả):
+
+  # --- Ngân hàng nhận tiền ---
+  VIETQR_BANK_BIN=970423                  <- GIỮ NGUYÊN (mã BIN của TPBank)
+  VIETQR_BANK_CODE=TPB                    <- GIỮ NGUYÊN
+  VIETQR_BANK_NAME=TPBank                 <- GIỮ NGUYÊN
+  VIETQR_ACCOUNT_NUMBER=<SỐ TK TPBANK>    <- THAY (từ bước 1.2)
+  VIETQR_ACCOUNT_NAME=<TÊN CHỦ TK>        <- THAY (in hoa, không dấu)
+
+  # --- Xác thực webhook SePay ---
+  BANK_WEBHOOK_AUTH_MODE=hmac             <- hoặc apikey (xem 4.3)
+  BANK_WEBHOOK_SECRET=<SECRET TỪ SEPAY>   <- THAY (từ bước 4.3)
+  BANK_WEBHOOK_API_KEY=                   <- chỉ điền nếu dùng mode apikey
+
+  # --- Thời gian chờ thanh toán ---
+  PAYMENT_TTL_MINUTES=15                  <- có thể để 15, hoặc 3 để test nhanh
+
+  # --- Email xác nhận ---
+  EMAIL_PROVIDER=log                      <- để "log" ở lần test đầu (xem PHẦN 8)
+
+  # --- URL public (nếu dùng ngrok) ---
+  API_BASE_URL=https://abcd-1234.ngrok-free.app
+  STOREFRONT_URL=http://localhost:3000
+
+QUY TẮC: KHÔNG commit file .env lên git (đã được .gitignore sẵn).
+          KHÔNG dán secret vào frontend, không dán vào chat/issue.
+
+Kiểm tra: nếu thiếu biến bắt buộc, backend ở chế độ dev sẽ IN CẢNH BÁO khi khởi
+động (còn ở production thì sẽ không chạy). Xem log lúc start.
+
+
+================================================================================
+ PHẦN 6 - CHẠY HỆ THỐNG
+================================================================================
+
+6.1. Migration database (chỉ cần làm 1 lần)
+
+     Terminal 1:
+       cd backend
+       npm run migrate:vietqr                  # xem trước, không thay đổi gì
+       npm run migrate:vietqr -- --apply       # thực hiện
+
+     Việc này dọn dữ liệu payment cũ không tương thích và TẠO LẠI CÁC UNIQUE
+     INDEX bắt buộc (paymentCode, idempotencyKey, transactionId). Script sẽ báo
+     lỗi rõ ràng nếu index không tạo được - đừng bỏ qua nếu thấy lỗi.
+
+6.2. Chạy backend
+
+     Terminal 1:
+       cd backend
+       npm run dev
+     -> đợi thấy: "LylaGlass API đang chạy tại ..."
+                  "Payment expiry job đã khởi động"
+
+     LƯU Ý: nếu port 4000 đang bị chiếm bởi lần chạy cũ, tắt tiến trình cũ đi,
+     nếu không backend mới sẽ không lên được và bạn sẽ test trên code cũ.
+
+6.3. Chạy frontend
+
+     Terminal 2:
+       cd frontend
+       npm run dev
+     -> http://localhost:3000
+
+6.4. Chạy ngrok
+
+     Terminal 3:
+       ngrok http 4000
+     -> copy URL https, cập nhật vào webhook SePay (PHẦN 4) nếu URL đổi.
+
+6.5. Tạo 1 sản phẩm giá rẻ để test cho đỡ tốn tiền
+
+     - Vào http://localhost:3000/quan-tri/dang-nhap
+       (email/password = ADMIN_SEED_EMAIL / ADMIN_SEED_PASSWORD trong .env)
+     - Sản phẩm -> Thêm mới, điền ĐÚNG như sau:
+
+         Tên sản phẩm   : Sản phẩm test thanh toán
+         Slug (URL)     : san-pham-test-thanh-toan
+                          (chỉ a-z, 0-9, dấu gạch ngang; không dấu, không hoa)
+         Danh mục       : chọn 1 danh mục có sẵn (bắt buộc)
+         Trạng thái     : Đang bán        <- bắt buộc, nếu để nháp thì không mua được
+         Mô tả ngắn     : Dùng để test luồng chuyển khoản
+         Hình ảnh       : để trống
+
+         Nhãn phân loại : Loại
+         Biến thể 1:
+           SKU          : TEST-01
+           Tên biến thể : Mặc định
+           Giá bán      : 2000       <- số nguyên, KHÔNG dấu chấm/phẩy
+           Giá gốc      : để trống
+           Tồn kho      : 50
+
+     - Lưu.
+
+     LƯU Ý VỀ ẢNH: form không có nút upload file, chỉ nhập URL. Và next/image
+     chỉ cho phép 2 domain (khai báo trong frontend/next.config.ts):
+         images.unsplash.com
+         res.cloudinary.com
+     Dán URL ảnh từ domain khác sẽ làm lỗi trang. Muốn dùng domain khác thì
+     thêm vào remotePatterns trong next.config.ts rồi restart frontend.
+
+     LƯU Ý VỀ PHÍ SHIP: nếu Settings đang để phí ship 30.000đ thì tổng đơn sẽ
+     là 32.000đ. Vào Quản trị -> Vận chuyển đặt phí ship = 0 để tổng đơn đúng
+     2.000đ. Nhớ đặt lại sau khi test xong.
+
+     Số tiền chuyển khoản phải ĐÚNG BẰNG tổng đơn (đã gồm phí ship, trừ giảm
+     giá), nếu không hệ thống sẽ từ chối xác nhận.
+
+
+================================================================================
+ PHẦN 7 - TEST LUỒNG THẬT (phần chính)
+================================================================================
+
+Mở sẵn Terminal 1 (log backend) để theo dõi, làm lần lượt:
+
+BƯỚC 1 - Đặt hàng
+  - Vào http://localhost:3000/san-pham -> mở "Sản phẩm test thanh toán"
+  - Thêm vào giỏ -> vào /gio-hang -> Thanh toán
+  - Điền họ tên, EMAIL THẬT CỦA BẠN, SĐT, địa chỉ
+  - Phần "Phương thức thanh toán" chỉ có: Chuyển khoản ngân hàng (VietQR)  [đúng]
+  - Bấm "Đặt hàng & lấy mã VietQR"
+
+  ✔ Kỳ vọng: chuyển sang trang /thanh-toan/LG2026xxxx-xxxxxx
+             hiện QR + Ngân hàng TPBank + số TK + tên + số tiền + nội dung
+             chuyển khoản (dạng LGxxxxxx) + đồng hồ đếm ngược
+  ✔ Log backend: "payment created (awaiting bank transfer)"
+
+BƯỚC 2 - Kiểm tra QR đúng
+  - Mở app ngân hàng -> quét QR (CHƯA bấm xác nhận chuyển tiền)
+  ✔ Kỳ vọng app tự điền: đúng TPBank, đúng số TK, đúng số tiền, đúng nội dung
+    (mã LGxxxxxx). Nếu app không tự điền số tiền/nội dung -> điền tay cho khớp
+    tuyệt đối, nhất là NỘI DUNG.
+
+BƯỚC 3 - Chuyển tiền thật
+  - Bấm xác nhận chuyển khoản trong app ngân hàng.
+
+BƯỚC 4 - Xem hệ thống tự xác nhận
+  - KHÔNG bấm F5, KHÔNG bấm gì cả, chỉ nhìn trang web.
+  ✔ Sau vài giây (thường 3-10s), trang tự chuyển thành:
+        "✓ Thanh toán thành công"
+        + mã đơn, số tiền, [Xem đơn hàng] [Tiếp tục mua sắm]
+
+  ✔ Log backend phải có lần lượt:
+        payment webhook received
+        payment matched
+        payment marked paid
+        order confirmed
+        email sent
+
+  (Nút "Tôi đã chuyển khoản" chỉ để kiểm tra lại trạng thái - nó KHÔNG tự đánh
+   dấu đã thanh toán. Bấm hay không bấm đều không ảnh hưởng.)
+
+BƯỚC 5 - Kiểm tra email
+  - Nếu EMAIL_PROVIDER=log: nội dung email in ra ở Terminal 1
+    (tìm dòng "Email (log provider, không gửi thật)"). Xem đủ: mã đơn, số tiền,
+    phương thức, danh sách sản phẩm, địa chỉ, link tra cứu.
+  - Nếu đã cấu hình Resend (PHẦN 8): kiểm tra hộp thư (cả thư mục Spam).
+
+BƯỚC 6 - Kiểm tra trang đơn hàng
+  - Bấm [Xem đơn hàng] hoặc vào /don-hang/<MÃ ĐƠN>?email=<email đã nhập>
+  ✔ Phải hiện: "Đã thanh toán · Đã xác nhận đơn hàng"
+  ✔ Bấm F5 nhiều lần vẫn đúng (không bị cache trạng thái cũ)
+
+BƯỚC 7 - Kiểm tra trang admin
+  - /quan-tri/thanh-toan
+    ✔ Bảng trên: đơn ở trạng thái "Đã thanh toán"
+    ✔ Bảng dưới "Giao dịch ngân hàng nhận được": giao dịch vừa rồi,
+      kết quả đối soát = "Đã khớp đơn"
+  - /quan-tri/don-hang/<id> -> khối "Thanh toán"
+    ✔ Xem đủ: mã thanh toán, số tiền cần thu / đã nhận, mã giao dịch ngân hàng,
+      reference code, thời gian giao dịch, tạo lúc, hết hạn lúc, thanh toán lúc,
+      trạng thái email.
+
+BƯỚC 8 - Test đóng trình duyệt (rất nên thử)
+  - Đặt 1 đơn mới -> đóng hẳn tab/trình duyệt -> chuyển khoản
+  - Chờ ~10s, mở lại /don-hang/<mã>?email=...
+  ✔ Đơn vẫn "Đã thanh toán" (webhook về backend, không phụ thuộc trình duyệt)
+
+BƯỚC 9 - Test hết hạn (không chuyển tiền)
+  - Tạm đặt PAYMENT_TTL_MINUTES=2 trong .env, restart backend
+  - Đặt 1 đơn mới -> KHÔNG chuyển tiền -> chờ khoảng 2-3 phút
+  ✔ Trang tự chuyển sang thông báo hết thời gian thanh toán
+  ✔ Log: "payment expired - order cancelled, inventory and coupon released"
+  ✔ Tồn kho sản phẩm test tăng trở lại (Quản trị -> Tồn kho)
+  - Nhớ đặt PAYMENT_TTL_MINUTES về 15 sau khi test xong.
+
+BƯỚC 10 - Test chuyển sai số tiền (tuỳ chọn, sẽ mất/kẹt số tiền nhỏ)
+  - Đặt đơn 2.000đ, nhưng chuyển 1.000đ (nhớ giữ đúng nội dung LGxxxxxx)
+  ✔ Đơn KHÔNG được đánh dấu đã thanh toán
+  ✔ Log: "payment rejected - wrong amount"
+  ✔ /quan-tri/thanh-toan -> giao dịch = "Bị từ chối", có ghi chú lý do
+  ✔ Trang chi tiết đơn hiện banner "Cần đối soát thủ công"
+  (Đây là hành vi cố ý: chuyển thiếu hoặc chuyển thừa đều không tự động xác nhận.)
+
+
+================================================================================
+ PHẦN 8 - BẬT EMAIL GỬI THẬT (Resend)
+================================================================================
+
+Lần test đầu nên để EMAIL_PROVIDER=log cho gọn. Khi muốn gửi email thật:
+
+8.1. Vào https://resend.com -> Sign up (có gói free).
+
+8.2. API Keys -> Create API Key -> copy (dạng re_xxxxxxxx).
+     Key chỉ hiện 1 lần, copy ngay.
+
+8.3. Về việc gửi tới email khách - ĐỌC KỸ, đây là chỗ hay mắc:
+
+     CHƯA VERIFY DOMAIN (chế độ sandbox):
+       - Chỉ được gửi TỪ : onboarding@resend.dev
+       - Chỉ được gửi TỚI: đúng email bạn dùng để đăng ký Resend
+       - Gửi cho email khác -> Resend trả lỗi 403
+       - Đủ để test, KHÔNG dùng cho khách thật
+       https://resend.com/docs/knowledge-base/403-error-resend-dev-domain
+
+     MUỐN GỬI CHO KHÁCH BẤT KỲ -> phải verify domain:
+
+       B1. Phải TỰ CÓ DOMAIN trước. Resend không cấp domain.
+           Mua ở Cloudflare/Namecheap (.com, nhanh) hoặc Tenten/iNET/Nhân Hoà
+           (.vn, cần giấy tờ).
+
+       B2. resend.com -> Domains -> Add Domain.
+           NÊN dùng subdomain để tách uy tín gửi thư:
+              nên     : send.lylaglass.vn
+              không   : lylaglass.vn
+
+       B3. Resend hiện ra danh sách record cần thêm, thường gồm:
+              MX          (nhận phản hồi / return-path)
+              TXT  SPF    (khai báo server nào được gửi thay domain)
+              TXT  DKIM   tại host resend._domainkey  (chữ ký xác thực)
+           Giá trị DKIM là key sinh RIÊNG cho bạn -> copy từ dashboard,
+           đừng copy từ hướng dẫn nào khác.
+
+       B4. Vào trang quản lý DNS của nhà cung cấp domain, thêm đúng các record
+           đó. LỖI HAY GẶP: nhiều nhà cung cấp tự thêm domain vào cuối, nên ô
+           Host chỉ nhập phần đầu:
+              đúng : resend._domainkey.send
+              sai  : resend._domainkey.send.lylaglass.vn
+           LƯU Ý: một domain chỉ được có ĐÚNG 1 record SPF. Nếu đã có SPF sẵn
+           thì phải GỘP vào, không được thêm record SPF thứ hai.
+
+       B5. Bấm Verify. Thường xanh sau 5-10 phút (TTL DNS cao có thể lâu hơn).
+
+       B6. EMAIL_FROM phải là địa chỉ THUỘC domain đã verify, nếu không vẫn 403.
+
+8.4. Điền vào backend/.env:
+       EMAIL_PROVIDER=resend
+       EMAIL_API_KEY=re_xxxxxxxx
+       EMAIL_FROM=LylaGlass <no-reply@domain-cua-ban.vn>
+       EMAIL_REPLY_TO=cskh@domain-cua-ban.vn      (tuỳ chọn)
+       EMAIL_MAX_ATTEMPTS=3
+
+       # Email thông báo cho SHOP mỗi khi có đơn đã thanh toán.
+       # Nhiều người thì cách nhau bằng dấu phẩy. Để TRỐNG là tắt tính năng.
+       ORDER_NOTIFICATION_EMAILS=chu-shop@gmail.com,ke-toan@gmail.com
+
+     LƯU Ý khi CHƯA verify domain: đây là địa chỉ NHẬN, nên nó phải là đúng
+     email đã dùng để đăng ký Resend. Đừng điền onboarding@resend.dev vào đây
+     (đó là địa chỉ GỬI, dùng cho EMAIL_FROM).
+
+     Mỗi lần thanh toán thành công, hệ thống gửi 2 email độc lập:
+       - email xác nhận  -> khách (địa chỉ khách nhập lúc checkout)
+       - email đơn mới   -> shop (ORDER_NOTIFICATION_EMAILS), gồm: số tiền,
+         danh sách cần đóng gói kèm SKU, địa chỉ giao, ghi chú của khách,
+         thông tin đối soát (mã giao dịch NH, reference), và link mở đơn
+         trong trang quản trị.
+     Một email lỗi không ảnh hưởng email kia, và không email nào làm mất
+     trạng thái đã thanh toán. Trạng thái từng email xem ở trang chi tiết đơn
+     trong admin.
+
+8.5. Restart backend, đặt đơn mới, chuyển khoản, kiểm tra hộp thư.
+
+8.6. Nếu email lỗi: ĐƠN VẪN LÀ ĐÃ THANH TOÁN (đúng thiết kế - email lỗi không
+     bao giờ làm rollback thanh toán). Trạng thái email xem ở trang chi tiết đơn
+     trong admin ("Gửi thất bại" + lý do). Hệ thống sẽ tự thử lại tối đa
+     EMAIL_MAX_ATTEMPTS lần.
+
+
+================================================================================
+ PHẦN 9 - XỬ LÝ SỰ CỐ
+================================================================================
+
+Tiền đã vào TPBank nhưng web không tự cập nhật:
+  1. Dashboard SePay có thấy giao dịch không?
+     Không -> lỗi liên kết bank, xử lý ở PHẦN 2.
+  2. SePay có ghi log gọi webhook không? Xem lịch sử webhook trong SePay:
+     - HTTP 401 -> BANK_WEBHOOK_SECRET trong .env khác secret trong SePay,
+                   hoặc BANK_WEBHOOK_AUTH_MODE sai (hmac/apikey).
+     - HTTP 404 -> URL sai. Phải kết thúc bằng /api/payments/bank-webhook
+     - Timeout / không kết nối được -> ngrok đã tắt hoặc URL đã đổi.
+  3. Log backend có "payment webhook received" không?
+     Có, kèm "payment rejected - ..." -> đọc lý do:
+       wrong amount        : chuyển sai số tiền (phải đúng tuyệt đối)
+       wrong payment code  : nội dung chuyển khoản mất mã LGxxxxxx
+       wrong bank account  : VIETQR_ACCOUNT_NUMBER trong .env khác số tài khoản
+                             thật mà SePay báo -> sửa .env cho khớp
+       sau hạn thanh toán  : chuyển quá muộn, đơn đã bị huỷ
+
+Trang thanh toán báo "Không tìm thấy thông tin thanh toán":
+  - Thiếu ?email=... trên URL, hoặc email không khớp email lúc đặt hàng.
+
+Backend không khởi động được:
+  - Đọc cảnh báo lúc start: thiếu biến .env nào.
+  - "EADDRINUSE :4000": còn tiến trình backend cũ đang chạy, tắt nó trước.
+
+QR quét ra sai ngân hàng / sai tài khoản:
+  - Kiểm tra VIETQR_BANK_BIN phải là 970423 (TPBank) và VIETQR_ACCOUNT_NUMBER
+    chỉ gồm chữ số. Restart backend sau khi sửa .env.
+  - Đơn đã tạo trước đó vẫn giữ QR cũ; hãy đặt đơn mới để test lại.
+
+Muốn xem lại toàn bộ giao dịch nhận được:
+  - /quan-tri/thanh-toan -> bảng "Giao dịch ngân hàng nhận được"
+    (lọc theo: Đã khớp đơn / Bị từ chối / Không khớp đơn)
+
+
+================================================================================
+ PHẦN 10 - CHECKLIST TRƯỚC KHI LÊN PRODUCTION
+================================================================================
+
+  [ ] Domain thật + HTTPS (không dùng ngrok), webhook URL cố định
+  [ ] Cập nhật lại webhook URL trong SePay theo domain thật
+  [ ] .env production: secret mới, KHÔNG dùng lại secret đã dùng lúc dev
+  [ ] JWT_SECRET, ADMIN_SEED_PASSWORD đã đổi khỏi giá trị mặc định
+  [ ] Domain email đã verified ở Resend, EMAIL_FROM dùng domain đó
+  [ ] Đã chạy npm run migrate:vietqr -- --apply trên DB production
+  [ ] Đã test thật 1 giao dịch trên production trước khi mở bán
+  [ ] Xoá sản phẩm test / đơn test
+  [ ] Nếu chạy nhiều instance backend: chỉ để 1 instance bật job hết hạn
+      (các instance khác đặt PAYMENT_EXPIRY_SWEEP_INTERVAL_MS=0)
+  [ ] Kiểm tra Settings phí ship / ngưỡng freeship đúng như mong muốn
+
+================================================================================
+ TÓM TẮT SIÊU NGẮN
+================================================================================
+  1. Có TK TPBank        -> lấy số TK + tên chủ TK
+  2. Đăng ký SePay       -> liên kết TPBank -> thử chuyển 2k xem SePay có thấy
+  3. ngrok http 4000     -> lấy URL https
+  4. SePay -> tạo webhook (URL + chỉ tiền vào + HMAC) -> copy SECRET
+  5. Điền backend/.env   -> VIETQR_ACCOUNT_NUMBER, VIETQR_ACCOUNT_NAME,
+                            BANK_WEBHOOK_SECRET
+  6. cd backend && npm run migrate:vietqr -- --apply && npm run dev
+  7. cd frontend && npm run dev
+  8. Tạo sản phẩm test giá 2.000đ, phí ship 0
+  9. Đặt hàng -> quét QR -> chuyển tiền -> ngồi xem trang tự báo thành công
+ 10. Kiểm tra: log backend, email, /don-hang/..., /quan-tri/thanh-toan
+================================================================================

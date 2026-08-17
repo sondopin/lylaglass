@@ -37,7 +37,9 @@ export const createCheckoutSchema = z.object({
   items: z.array(checkoutItemSchema).min(1, "Giỏ hàng đang trống"),
   couponCode: z.string().optional(),
   customerNote: z.string().max(1000).optional(),
-  paymentMethod: z.enum(["cod", "card", "bank_transfer", "mock"]).default("cod"),
+  // VietQR bank transfer is the only method. Accepted for explicitness, but the
+  // server sets the order's method itself — as it does the amount and totals.
+  paymentMethod: z.literal("bank_transfer").default("bank_transfer"),
 });
 
 export const lookupOrderQuerySchema = z.object({

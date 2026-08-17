@@ -9,4 +9,10 @@ export const couponRepository = {
     CouponModel.findByIdAndUpdate(id, data, { new: true, runValidators: true }).lean(),
   deleteById: (id: string) => CouponModel.findByIdAndDelete(id).lean(),
   incrementUsage: (id: string) => CouponModel.findByIdAndUpdate(id, { $inc: { usageCount: 1 } }),
+  /**
+   * Gives back a use counted at checkout when the order never got paid. The
+   * `usageCount > 0` guard keeps the counter from going negative.
+   */
+  decrementUsage: (id: string) =>
+    CouponModel.findOneAndUpdate({ _id: id, usageCount: { $gt: 0 } }, { $inc: { usageCount: -1 } }, { new: true }).lean(),
 };

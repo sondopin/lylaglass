@@ -28,10 +28,56 @@ export const env = {
   },
 
   payment: {
-    provider: (process.env.PAYMENT_PROVIDER ?? "mock") as "mock" | "stripe",
-    stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? "",
-    stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
+    // Only one storefront payment method exists: VietQR bank transfer to the shop's TPBank account.
+    provider: (process.env.PAYMENT_PROVIDER ?? "vietqr") as "vietqr",
+    /** Server-side lifetime of a payment, counted from Payment.createdAt. */
+    ttlMinutes: Number(process.env.PAYMENT_TTL_MINUTES ?? 15),
+    /** How often the background job expires timed-out payments and retries failed emails. */
+    expirySweepIntervalMs: Number(process.env.PAYMENT_EXPIRY_SWEEP_INTERVAL_MS ?? 60_000),
+
+    vietqr: {
+      /** NAPAS BIN encoded into the QR (TPBank = 970423). Not the same thing as the short code. */
+      bankBin: process.env.VIETQR_BANK_BIN ?? "970423",
+      /** Short bank code, display/logo only (TPBank = TPB). */
+      bankCode: process.env.VIETQR_BANK_CODE ?? "TPB",
+      bankName: process.env.VIETQR_BANK_NAME ?? "TPBank",
+      accountNumber: process.env.VIETQR_ACCOUNT_NUMBER ?? "",
+      accountName: process.env.VIETQR_ACCOUNT_NAME ?? "",
+    },
+
+    /** Incoming-transfer notification provider — a separate concern from QR generation. */
+    bankWebhook: {
+      provider: (process.env.BANK_WEBHOOK_PROVIDER ?? "sepay") as "sepay",
+      authMode: (process.env.BANK_WEBHOOK_AUTH_MODE ?? "hmac") as "hmac" | "apikey",
+      /** HMAC-SHA256 shared secret (BANK_WEBHOOK_AUTH_MODE=hmac). */
+      secret: process.env.BANK_WEBHOOK_SECRET ?? "",
+      /** API key SePay sends as `Authorization: Apikey <key>` (BANK_WEBHOOK_AUTH_MODE=apikey). */
+      apiKey: process.env.BANK_WEBHOOK_API_KEY ?? "",
+      /** Replay window for HMAC-signed requests. */
+      timestampToleranceSeconds: Number(process.env.BANK_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS ?? 300),
+    },
   },
+
+  email: {
+    provider: (process.env.EMAIL_PROVIDER ?? "log") as "resend" | "log",
+    apiKey: process.env.EMAIL_API_KEY ?? "",
+    from: process.env.EMAIL_FROM ?? "LylaGlass <no-reply@lylaglass.vn>",
+    replyTo: process.env.EMAIL_REPLY_TO ?? "",
+    /** Confirmation emails stop being retried after this many failed attempts. */
+    maxAttempts: Number(process.env.EMAIL_MAX_ATTEMPTS ?? 3),
+    /**
+     * Shop-side recipients of the "new paid order" alert (comma-separated).
+     * Empty disables the alert entirely — the customer's confirmation is
+     * unaffected either way.
+     */
+    orderNotificationRecipients: (process.env.ORDER_NOTIFICATION_EMAILS ?? "")
+      .split(",")
+      .map((address) => address.trim())
+      .filter(Boolean),
+  },
+
+  /** Public storefront base URL, used to build order-lookup links inside emails. */
+  storefrontUrl: process.env.STOREFRONT_URL ?? process.env.CLIENT_ORIGIN ?? "http://localhost:3000",
 
   rateLimit: {
     windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS ?? 900_000),
