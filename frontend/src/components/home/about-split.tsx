@@ -1,12 +1,13 @@
 import Image from "next/image";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { Reveal } from "@/components/reveal";
 import { MARKETING_IMAGES } from "@/lib/marketing-images";
 
 export function AboutSplit() {
   return (
     <section className="bg-mint">
-      <div className="container-lyla grid grid-cols-1 items-center gap-10 py-16 sm:py-20 lg:grid-cols-2 lg:gap-16">
+      <Reveal className="container-lyla grid grid-cols-1 items-center gap-10 py-16 sm:py-20 lg:grid-cols-2 lg:gap-16">
         <div className="order-2 flex flex-col items-start gap-4 lg:order-1">
           <h2 className="font-heading text-3xl font-medium sm:text-4xl">Về LylaGlass</h2>
           <p className="text-xs font-semibold tracking-[0.2em] text-foreground/70 uppercase">Từ năm 2023</p>
@@ -24,7 +25,7 @@ export function AboutSplit() {
             <Image src={MARKETING_IMAGES.about} alt="Không gian trưng bày ly thủy tinh LylaGlass" fill sizes="480px" className="object-cover" />
           </div>
         </div>
-      </div>
+      </Reveal>
     </section>
   );
 }

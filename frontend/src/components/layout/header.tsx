@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Menu, PackageSearch, Search, ShoppingBag, X } from "lucide-react";
 import { Logo } from "./logo";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,16 @@ export function Header({ categories }: { categories: Category[] }) {
   const count = cartCount(items);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    function onScroll() {
+      setScrolled(window.scrollY > 12);
+    }
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
   const navLinks = [
     STATIC_LINKS[0],
@@ -43,8 +53,18 @@ export function Header({ categories }: { categories: Category[] }) {
   }
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border/70 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-      <div className="container-lyla flex h-18 items-center justify-between gap-4 py-3">
+    <header
+      className={cn(
+        "sticky top-0 z-40 border-b border-border/70 bg-background/95 backdrop-blur transition-shadow duration-300 supports-[backdrop-filter]:bg-background/80",
+        scrolled && "shadow-sm"
+      )}
+    >
+      <div
+        className={cn(
+          "container-lyla flex items-center justify-between gap-4 transition-[height,padding] duration-300 ease-out",
+          scrolled ? "h-14 py-2" : "h-18 py-3"
+        )}
+      >
         <div className="flex items-center gap-2 lg:hidden">
           <Sheet>
             <SheetTrigger render={<Button variant="ghost" size="icon" aria-label="Mở menu" />}>
@@ -74,7 +94,7 @@ export function Header({ categories }: { categories: Category[] }) {
           </Sheet>
         </div>
 
-        <Logo />
+        <Logo className={cn("transition-transform duration-300", scrolled && "scale-90")} />
 
         <nav className="hidden items-center gap-7 lg:flex">
           {navLinks.map((link) => (
@@ -106,16 +126,34 @@ export function Header({ categories }: { categories: Category[] }) {
               </Button>
             </form>
           ) : (
-            <Button variant="ghost" size="icon" onClick={() => setSearchOpen(true)} aria-label="Tìm kiếm">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="transition-transform duration-200 hover:scale-125"
+              onClick={() => setSearchOpen(true)}
+              aria-label="Tìm kiếm"
+            >
               <Search className="size-5" />
             </Button>
           )}
 
-          <Button variant="ghost" size="icon" aria-label="Tra cứu đơn hàng" render={<Link href="/track-order" />}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="transition-transform duration-200 hover:scale-125"
+            aria-label="Tra cứu đơn hàng"
+            render={<Link href="/track-order" />}
+          >
             <PackageSearch className="size-5" />
           </Button>
 
-          <Button variant="ghost" size="icon" className="relative" onClick={openDrawer} aria-label="Giỏ hàng">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="relative transition-transform duration-200 hover:scale-125"
+            onClick={openDrawer}
+            aria-label="Giỏ hàng"
+          >
             <ShoppingBag className="size-5" />
             {count > 0 && (
               <span className="absolute -right-0.5 -top-0.5 flex size-4.5 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">

@@ -1,5 +1,6 @@
 import { Product } from "@/lib/api/types";
 import { ProductCard } from "./product-card";
+import { RevealStagger } from "@/components/reveal";
 
 export function ProductGrid({ products, emptyMessage }: { products: Product[]; emptyMessage?: string }) {
   if (products.length === 0) {
@@ -12,10 +13,10 @@ export function ProductGrid({ products, emptyMessage }: { products: Product[]; e
   }
 
   return (
-    <div className="grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-3 lg:grid-cols-4">
+    <RevealStagger className="grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-3 lg:grid-cols-4">
       {products.map((product) => (
         <ProductCard key={product._id} product={product} />
       ))}
-    </div>
+    </RevealStagger>
   );
 }

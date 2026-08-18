@@ -4,6 +4,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Reveal } from "@/components/reveal";
 
 export function NewsletterSignup() {
   const [email, setEmail] = useState("");
@@ -20,7 +21,7 @@ export function NewsletterSignup() {
 
   return (
     <section className="bg-mint">
-      <div className="container-lyla flex flex-col items-center gap-4 py-16 text-center sm:py-20">
+      <Reveal className="container-lyla flex flex-col items-center gap-4 py-16 text-center sm:py-20">
         <h2 className="font-heading text-3xl font-medium sm:text-4xl">Gia nhập cộng đồng LylaGlass</h2>
         <p className="max-w-md text-xs font-medium tracking-widest text-foreground/70 uppercase">
           Nhận tin khuyến mãi, sản phẩm mới và ưu đãi dành riêng cho bạn
@@ -37,7 +38,7 @@ export function NewsletterSignup() {
             Đăng ký
           </Button>
         </form>
-      </div>
+      </Reveal>
     </section>
   );
 }

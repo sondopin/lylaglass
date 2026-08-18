@@ -1,4 +1,5 @@
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Reveal } from "@/components/reveal";
 
 const FAQS = [
   { q: "Phí vận chuyển được tính như thế nào?", a: "Miễn phí vận chuyển cho đơn hàng từ 490.000đ. Đơn dưới mức này áp dụng phí vận chuyển đồng giá 30.000đ toàn quốc." },
@@ -10,7 +11,7 @@ const FAQS = [
 export function FaqSection() {
   return (
     <section className="bg-rose-deep/10">
-      <div className="container-lyla py-16 sm:py-20">
+      <Reveal className="container-lyla py-16 sm:py-20">
         <h2 className="mx-auto mb-10 max-w-xl text-center font-heading text-3xl font-medium italic sm:text-4xl">
           Câu hỏi thường gặp
         </h2>
@@ -22,7 +23,7 @@ export function FaqSection() {
             </AccordionItem>
           ))}
         </Accordion>
-      </div>
+      </Reveal>
     </section>
   );
 }

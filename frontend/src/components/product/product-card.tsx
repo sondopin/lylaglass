@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 export function ProductCard({ product }: { product: Product }) {
   const addItem = useCartStore((s) => s.addItem);
   const image = product.images[0];
+  const hoverImage = product.images[1];
   const hasSingleVariant = product.variants.length === 1;
   const variant = product.variants[0];
 
@@ -51,7 +52,19 @@ export function ProductCard({ product }: { product: Product }) {
             alt={image.alt || product.name}
             fill
             sizes="(min-width: 1024px) 25vw, (min-width: 640px) 33vw, 50vw"
-            className="object-cover transition-transform duration-500 group-hover:scale-[1.04]"
+            className={cn(
+              "object-cover transition-all duration-500",
+              hoverImage ? "group-hover:opacity-0" : "group-hover:scale-[1.04]"
+            )}
+          />
+        )}
+        {hoverImage && (
+          <Image
+            src={hoverImage.url}
+            alt={hoverImage.alt || product.name}
+            fill
+            sizes="(min-width: 1024px) 25vw, (min-width: 640px) 33vw, 50vw"
+            className="object-cover opacity-0 transition-opacity duration-500 group-hover:opacity-100"
           />
         )}
 

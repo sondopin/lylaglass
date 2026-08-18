@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Reveal } from "@/components/reveal";
 
 const contactSchema = z.object({
   name: z.string().min(1, "Vui lòng nhập họ tên"),
@@ -31,6 +32,7 @@ export function ContactFormSection() {
 
   return (
     <section className="container-lyla py-16 sm:py-20">
+      <Reveal>
       <div className="mx-auto max-w-lg text-center">
         <h2 className="font-heading text-3xl font-medium sm:text-4xl">Liên hệ với chúng tôi</h2>
         <p className="mt-2 text-sm text-muted-foreground">Có câu hỏi? Điền vào biểu mẫu bên dưới nhé.</p>
@@ -96,6 +98,7 @@ export function ContactFormSection() {
           <p className="text-center text-xs text-muted-foreground">Chúng tôi sẽ phản hồi trong vòng 12 giờ — cảm ơn bạn đã liên hệ!</p>
         </form>
       </Form>
+      </Reveal>
     </section>
   );
 }
