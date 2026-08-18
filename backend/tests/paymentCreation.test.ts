@@ -211,7 +211,7 @@ describe("payment confirmation email", () => {
     expect(email.text).toContain("Chuyển khoản ngân hàng qua VietQR / TPBank");
     expect(email.text).toContain("Đơn hàng của bạn đã được xác nhận.");
     expect(email.text).toContain("Ly thuỷ tinh Lyla");
-    expect(email.text).toContain("https://lylaglass.vn/don-hang/LG20260817-K7M2XQ");
+    expect(email.text).toContain("https://lylaglass.vn/orders/LG20260817-K7M2XQ");
   });
 
   it("escapes customer-supplied text in the HTML body", () => {
@@ -269,7 +269,7 @@ describe("shop owner notification email", () => {
     expect(email.text).toContain("92704");
     expect(email.text).toContain("FT26012345678");
     // Straight into the admin screen for this order.
-    expect(email.text).toContain(`/quan-tri/don-hang/${String(paidOrder._id)}`);
+    expect(email.text).toContain(`/admin/orders/${String(paidOrder._id)}`);
   });
 
   it("surfaces the customer note and a manual-review warning when present", () => {

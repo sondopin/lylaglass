@@ -13,12 +13,30 @@ export function Footer({ categories, settings }: { categories: Category[]; setti
             tặng, mùa lễ hội đến những ngày thường.
           </p>
           <div className="flex gap-4 pt-1 text-xs font-medium text-muted-foreground">
-            <Link href="#" className="hover:text-foreground hover:underline">
+            <a
+              href="https://www.facebook.com/lylaglass.lythuytinh"
+              target="_blank"
+              rel="noreferrer"
+              className="hover:text-foreground hover:underline"
+            >
               Facebook
-            </Link>
-            <Link href="#" className="hover:text-foreground hover:underline">
+            </a>
+            <a
+              href="https://www.instagram.com/lylaglass_lythuytinh/"
+              target="_blank"
+              rel="noreferrer"
+              className="hover:text-foreground hover:underline"
+            >
               Instagram
-            </Link>
+            </a>
+            <a
+              href="https://www.tiktok.com/@lylaglass"
+              target="_blank"
+              rel="noreferrer"
+              className="hover:text-foreground hover:underline"
+            >
+              TikTok
+            </a>
           </div>
         </div>
 
@@ -27,13 +45,13 @@ export function Footer({ categories, settings }: { categories: Category[]; setti
           <ul className="flex flex-col gap-2 text-sm text-muted-foreground">
             {categories.map((c) => (
               <li key={c.slug}>
-                <Link href={`/danh-muc/${c.slug}`} className="hover:text-foreground">
+                <Link href={`/categories/${c.slug}`} className="hover:text-foreground">
                   {c.name}
                 </Link>
               </li>
             ))}
             <li>
-              <Link href="/san-pham" className="hover:text-foreground">
+              <Link href="/products" className="hover:text-foreground">
                 Tất cả sản phẩm
               </Link>
             </li>
@@ -44,17 +62,17 @@ export function Footer({ categories, settings }: { categories: Category[]; setti
           <h3 className="mb-3 text-xs font-semibold tracking-widest text-foreground/70 uppercase">Về LylaGlass</h3>
           <ul className="flex flex-col gap-2 text-sm text-muted-foreground">
             <li>
-              <Link href="/gioi-thieu" className="hover:text-foreground">
+              <Link href="/about" className="hover:text-foreground">
                 Câu chuyện thương hiệu
               </Link>
             </li>
             <li>
-              <Link href="/cau-hoi-thuong-gap" className="hover:text-foreground">
+              <Link href="/faq" className="hover:text-foreground">
                 Câu hỏi thường gặp
               </Link>
             </li>
             <li>
-              <Link href="/lien-he" className="hover:text-foreground">
+              <Link href="/contact" className="hover:text-foreground">
                 Liên hệ
               </Link>
             </li>
@@ -65,7 +83,7 @@ export function Footer({ categories, settings }: { categories: Category[]; setti
           <h3 className="mb-3 text-xs font-semibold tracking-widest text-foreground/70 uppercase">Hỗ trợ khách hàng</h3>
           <ul className="flex flex-col gap-2 text-sm text-muted-foreground">
             <li>
-              <Link href="/tra-cuu-don-hang" className="hover:text-foreground">
+              <Link href="/track-order" className="hover:text-foreground">
                 Tra cứu đơn hàng
               </Link>
             </li>

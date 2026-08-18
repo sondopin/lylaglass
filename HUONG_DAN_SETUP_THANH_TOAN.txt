@@ -224,7 +224,7 @@ Kiểm tra: nếu thiếu biến bắt buộc, backend ở chế độ dev sẽ 
 
 6.5. Tạo 1 sản phẩm giá rẻ để test cho đỡ tốn tiền
 
-     - Vào http://localhost:3000/quan-tri/dang-nhap
+     - Vào http://localhost:3000/admin/login
        (email/password = ADMIN_SEED_EMAIL / ADMIN_SEED_PASSWORD trong .env)
      - Sản phẩm -> Thêm mới, điền ĐÚNG như sau:
 
@@ -268,13 +268,13 @@ Kiểm tra: nếu thiếu biến bắt buộc, backend ở chế độ dev sẽ 
 Mở sẵn Terminal 1 (log backend) để theo dõi, làm lần lượt:
 
 BƯỚC 1 - Đặt hàng
-  - Vào http://localhost:3000/san-pham -> mở "Sản phẩm test thanh toán"
-  - Thêm vào giỏ -> vào /gio-hang -> Thanh toán
+  - Vào http://localhost:3000/products -> mở "Sản phẩm test thanh toán"
+  - Thêm vào giỏ -> vào /cart -> Thanh toán
   - Điền họ tên, EMAIL THẬT CỦA BẠN, SĐT, địa chỉ
   - Phần "Phương thức thanh toán" chỉ có: Chuyển khoản ngân hàng (VietQR)  [đúng]
   - Bấm "Đặt hàng & lấy mã VietQR"
 
-  ✔ Kỳ vọng: chuyển sang trang /thanh-toan/LG2026xxxx-xxxxxx
+  ✔ Kỳ vọng: chuyển sang trang /checkout/LG2026xxxx-xxxxxx
              hiện QR + Ngân hàng TPBank + số TK + tên + số tiền + nội dung
              chuyển khoản (dạng LGxxxxxx) + đồng hồ đếm ngược
   ✔ Log backend: "payment created (awaiting bank transfer)"
@@ -311,23 +311,23 @@ BƯỚC 5 - Kiểm tra email
   - Nếu đã cấu hình Resend (PHẦN 8): kiểm tra hộp thư (cả thư mục Spam).
 
 BƯỚC 6 - Kiểm tra trang đơn hàng
-  - Bấm [Xem đơn hàng] hoặc vào /don-hang/<MÃ ĐƠN>?email=<email đã nhập>
+  - Bấm [Xem đơn hàng] hoặc vào /orders/<MÃ ĐƠN>?email=<email đã nhập>
   ✔ Phải hiện: "Đã thanh toán · Đã xác nhận đơn hàng"
   ✔ Bấm F5 nhiều lần vẫn đúng (không bị cache trạng thái cũ)
 
 BƯỚC 7 - Kiểm tra trang admin
-  - /quan-tri/thanh-toan
+  - /admin/payments
     ✔ Bảng trên: đơn ở trạng thái "Đã thanh toán"
     ✔ Bảng dưới "Giao dịch ngân hàng nhận được": giao dịch vừa rồi,
       kết quả đối soát = "Đã khớp đơn"
-  - /quan-tri/don-hang/<id> -> khối "Thanh toán"
+  - /admin/orders/<id> -> khối "Thanh toán"
     ✔ Xem đủ: mã thanh toán, số tiền cần thu / đã nhận, mã giao dịch ngân hàng,
       reference code, thời gian giao dịch, tạo lúc, hết hạn lúc, thanh toán lúc,
       trạng thái email.
 
 BƯỚC 8 - Test đóng trình duyệt (rất nên thử)
   - Đặt 1 đơn mới -> đóng hẳn tab/trình duyệt -> chuyển khoản
-  - Chờ ~10s, mở lại /don-hang/<mã>?email=...
+  - Chờ ~10s, mở lại /orders/<mã>?email=...
   ✔ Đơn vẫn "Đã thanh toán" (webhook về backend, không phụ thuộc trình duyệt)
 
 BƯỚC 9 - Test hết hạn (không chuyển tiền)
@@ -342,7 +342,7 @@ BƯỚC 10 - Test chuyển sai số tiền (tuỳ chọn, sẽ mất/kẹt số 
   - Đặt đơn 2.000đ, nhưng chuyển 1.000đ (nhớ giữ đúng nội dung LGxxxxxx)
   ✔ Đơn KHÔNG được đánh dấu đã thanh toán
   ✔ Log: "payment rejected - wrong amount"
-  ✔ /quan-tri/thanh-toan -> giao dịch = "Bị từ chối", có ghi chú lý do
+  ✔ /admin/payments -> giao dịch = "Bị từ chối", có ghi chú lý do
   ✔ Trang chi tiết đơn hiện banner "Cần đối soát thủ công"
   (Đây là hành vi cố ý: chuyển thiếu hoặc chuyển thừa đều không tự động xác nhận.)
 
@@ -463,7 +463,7 @@ QR quét ra sai ngân hàng / sai tài khoản:
   - Đơn đã tạo trước đó vẫn giữ QR cũ; hãy đặt đơn mới để test lại.
 
 Muốn xem lại toàn bộ giao dịch nhận được:
-  - /quan-tri/thanh-toan -> bảng "Giao dịch ngân hàng nhận được"
+  - /admin/payments -> bảng "Giao dịch ngân hàng nhận được"
     (lọc theo: Đã khớp đơn / Bị từ chối / Không khớp đơn)
 
 
@@ -496,5 +496,5 @@ Muốn xem lại toàn bộ giao dịch nhận được:
   7. cd frontend && npm run dev
   8. Tạo sản phẩm test giá 2.000đ, phí ship 0
   9. Đặt hàng -> quét QR -> chuyển tiền -> ngồi xem trang tự báo thành công
- 10. Kiểm tra: log backend, email, /don-hang/..., /quan-tri/thanh-toan
+ 10. Kiểm tra: log backend, email, /orders/..., /admin/payments
 ================================================================================

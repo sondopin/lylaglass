@@ -298,7 +298,7 @@ Sổ ghi **mọi** thông báo tiền vào nhận được, kể cả giao dịc
 
 - Giỏ hàng nằm ở **localStorage** (Zustand `persist`, key `lylaglass-cart`) — không có server-side cart, không session.
 - Tra cứu đơn hàng dùng cặp **`orderNumber` + `email`** làm "mật khẩu yếu": [`getOrderForCustomer`](backend/src/services/order.service.ts) chỉ trả đơn khi email khớp (so sánh case-insensitive). Route: `GET /api/orders/lookup/:orderNumber?email=…`.
-- Trang xác nhận đơn `/don-hang/[orderNumber]?email=…` gắn `robots: { index: false }` để không lọt vào search engine.
+- Trang xác nhận đơn `/orders/[orderNumber]?email=…` gắn `robots: { index: false }` để không lọt vào search engine.
 
 ### 5.2 Admin: JWT Bearer
 
@@ -317,7 +317,7 @@ Mọi route admin đi qua [`requireAdmin`](backend/src/middlewares/adminAuth.ts)
 
 `requireRole("owner")` là lớp thứ hai, dùng cho các thao tác nhạy cảm: xoá category, sửa Settings.
 
-**Phía frontend**: token lưu trong Zustand persist (`lylaglass-admin-auth` → localStorage). [`useAdminGuard`](frontend/src/hooks/use-admin-guard.ts) đợi hydrate xong rồi redirect về `/quan-tri/dang-nhap` nếu không có token. Vì token ở localStorage nên **toàn bộ admin panel là client-side render** — middleware/SSR không đọc được nó.
+**Phía frontend**: token lưu trong Zustand persist (`lylaglass-admin-auth` → localStorage). [`useAdminGuard`](frontend/src/hooks/use-admin-guard.ts) đợi hydrate xong rồi redirect về `/admin/login` nếu không có token. Vì token ở localStorage nên **toàn bộ admin panel là client-side render** — middleware/SSR không đọc được nó.
 
 > **Đánh đổi đã biết**: localStorage dễ bị XSS hơn httpOnly cookie. Chấp nhận được cho admin panel nội bộ; nếu siết bảo mật thì chuyển sang httpOnly cookie + CSRF token.
 
@@ -362,7 +362,7 @@ Sort options của `/products`: `featured | newest | price_asc | price_desc | na
 
 Không có API call nào trong bước này.
 
-1. Trang PDP `/san-pham/[slug]` là **Server Component**, fetch product từ API lúc render (bao gồm `variants[].inventoryQty`).
+1. Trang PDP `/products/[slug]` là **Server Component**, fetch product từ API lúc render (bao gồm `variants[].inventoryQty`).
 2. [`PurchasePanel`](frontend/src/components/product-detail/purchase-panel.tsx) là Client Component: chọn variant → `useCartStore.addItem()`.
 3. Item lưu vào Zustand kèm **`maxQuantity = variant.inventoryQty`** (snapshot tồn kho lúc xem trang). Store tự clamp `quantity ≤ maxQuantity`.
 4. `addItem` set `isDrawerOpen = true` → Cart Drawer tự trượt ra.
@@ -372,7 +372,7 @@ Không có API call nào trong bước này.
 
 ### 7.2 Giai đoạn 2 — Checkout
 
-Trang [/thanh-toan](frontend/src/app/(storefront)/thanh-toan/page.tsx) (Client Component):
+Trang [/checkout](frontend/src/app/(storefront)/checkout/page.tsx) (Client Component):
 
 - Form validate bằng react-hook-form + Zod: họ tên, email, SĐT, địa chỉ (line1/line2/ward/district/province), ghi chú. **Không còn lựa chọn phương thức thanh toán** — chỉ hiển thị thông tin "Chuyển khoản ngân hàng (VietQR)".
 - Áp mã giảm giá gọi trước `POST /coupons/validate` để **preview** số tiền giảm (không lưu gì cả).
@@ -435,11 +435,11 @@ Backend [`processCheckout`](backend/src/services/checkout.service.ts) chạy 5 b
 
 Toàn bộ bước ③④⑤ nằm trong `try/catch`. Nếu lỗi xảy ra **trước khi** Order được ghi → `releaseReservedStock()` hoàn kho trực tiếp. Nếu lỗi xảy ra **sau khi** Order đã tồn tại → đơn được đánh `cancelled` và hoàn kho/coupon qua `releaseOrderReservations()` (đường có cờ), để job hết hạn hoặc admin sau này không hoàn kho lần thứ hai.
 
-Frontend nhận kết quả → `clear()` giỏ (đơn đã sống server-side) → điều hướng `/thanh-toan/{orderNumber}?email=…`.
+Frontend nhận kết quả → `clear()` giỏ (đơn đã sống server-side) → điều hướng `/checkout/{orderNumber}?email=…`.
 
 ### 7.3 Giai đoạn 3 — Thanh toán & Webhook
 
-Trang [/thanh-toan/[orderNumber]](frontend/src/app/(storefront)/thanh-toan/[orderNumber]/payment-content.tsx) hiển thị QR + thông tin chuyển khoản dạng text (có nút copy) + countdown, và **poll** `GET /orders/:orderNumber/payment-status` mỗi 3 giây:
+Trang [/checkout/[orderNumber]](frontend/src/app/(storefront)/checkout/[orderNumber]/payment-content.tsx) hiển thị QR + thông tin chuyển khoản dạng text (có nút copy) + countdown, và **poll** `GET /orders/:orderNumber/payment-status` mỗi 3 giây:
 
 - Dừng polling khi payment vào trạng thái terminal (`succeeded | failed | expired | refunded`), khi component unmount, và không bao giờ chạy vô hạn.
 - Countdown tính từ `expiresAt` **do backend trả về** — không dùng `setTimeout(15 phút)` phía client, vì reload trang sẽ làm sai TTL.
@@ -526,7 +526,7 @@ sequenceDiagram
     participant MAIL as Email provider
 
     U->>FE: Thêm vào giỏ (localStorage)
-    U->>FE: Điền form /thanh-toan
+    U->>FE: Điền form /checkout
     FE->>API: POST /checkout {items: id+sku+qty}
     API->>DB: Load products, verify giá & tồn kho
     API->>DB: decrementVariantStock (atomic, từng SKU)
@@ -537,7 +537,7 @@ sequenceDiagram
     API->>DB: create Payment (requires_action), gán order.paymentId
     API-->>FE: { order, payment: { qr, bank, paymentCode, expiresAt } }
     FE->>FE: clear() giỏ hàng
-    FE->>U: /thanh-toan/{orderNumber} — QR + thông tin CK + countdown
+    FE->>U: /checkout/{orderNumber} — QR + thông tin CK + countdown
 
     loop mỗi 3s cho tới khi terminal
         FE->>API: GET /orders/{orderNumber}/payment-status?email=
@@ -698,27 +698,27 @@ Toàn bộ URL đặt bằng **tiếng Việt không dấu**, có ý nghĩa SEO.
 | Route | Render | Mô tả |
 |---|---|---|
 | `/` | Server | Homepage: hero, marquee, category grid, product sections, about, FAQ, contact, newsletter |
-| `/san-pham` | Server | Tất cả sản phẩm + filter/sort/pagination |
-| `/san-pham/[slug]` | Server | PDP + JSON-LD `Product` schema + `generateMetadata` động |
-| `/danh-muc/[slug]` | Server | PLP theo danh mục |
-| `/tim-kiem` | Server | Kết quả tìm kiếm (`$text` search) |
-| `/gio-hang` | Client | Trang giỏ hàng đầy đủ |
-| `/thanh-toan` | Client | Form checkout (không còn chọn phương thức — chỉ VietQR) |
-| `/thanh-toan/[orderNumber]` | Server shell + Client | **Trang thanh toán VietQR**: QR, thông tin CK, countdown theo `expiresAt`, polling trạng thái, success state (`noindex`) |
-| `/don-hang/[orderNumber]` | Server (`force-dynamic`) | Xác nhận đơn (`noindex`), luôn đọc trạng thái mới nhất |
-| `/tra-cuu-don-hang` | Client | Tra cứu bằng mã đơn + email |
-| `/gioi-thieu`, `/lien-he`, `/cau-hoi-thuong-gap` | Server | Trang tĩnh |
+| `/products` | Server | Tất cả sản phẩm + filter/sort/pagination |
+| `/products/[slug]` | Server | PDP + JSON-LD `Product` schema + `generateMetadata` động |
+| `/categories/[slug]` | Server | PLP theo danh mục |
+| `/search` | Server | Kết quả tìm kiếm (`$text` search) |
+| `/cart` | Client | Trang giỏ hàng đầy đủ |
+| `/checkout` | Client | Form checkout (không còn chọn phương thức — chỉ VietQR) |
+| `/checkout/[orderNumber]` | Server shell + Client | **Trang thanh toán VietQR**: QR, thông tin CK, countdown theo `expiresAt`, polling trạng thái, success state (`noindex`) |
+| `/orders/[orderNumber]` | Server (`force-dynamic`) | Xác nhận đơn (`noindex`), luôn đọc trạng thái mới nhất |
+| `/track-order` | Client | Tra cứu bằng mã đơn + email |
+| `/about`, `/contact`, `/faq` | Server | Trang tĩnh |
 
-**Admin** — [src/app/quan-tri/](frontend/src/app/quan-tri/), toàn bộ **client-side** (vì token ở localStorage), layout Sidebar + Topbar, bọc bởi `useAdminGuard`.
+**Admin** — [src/app/admin/](frontend/src/app/admin/), toàn bộ **client-side** (vì token ở localStorage), layout Sidebar + Topbar, bọc bởi `useAdminGuard`.
 
-`/quan-tri` (dashboard) · `/dang-nhap` · `/san-pham` + `/moi` + `/[id]` · `/danh-muc` · `/don-hang` + `/[id]` · `/khach-hang` · `/ma-giam-gia` · `/ton-kho` · `/van-chuyen` · `/thanh-toan`
+`/admin` (dashboard) · `/admin/login` · `/admin/products` + `/new` + `/[id]` · `/admin/categories` · `/admin/orders` + `/[id]` · `/admin/customers` · `/admin/coupons` · `/admin/inventory` · `/admin/shipping` · `/admin/payments`
 
 ### 8.2 Chiến lược render & data fetching
 
 - **Storefront = Server Components**: gọi `apiClient` trực tiếp từ server, HTML đến browser đã có nội dung → tốt cho SEO. Chỉ những gì cần tương tác (`PurchasePanel`, `CartDrawer`, form) mới là Client Component.
 - **Admin = Client Components + TanStack Query**: cần token trong localStorage.
 - **Fail-soft**: storefront layout bọc `getLayoutData()` trong `try/catch` với `FALLBACK_SETTINGS` — API chết thì trang vẫn render được khung.
-- **Dữ liệu thanh toán tuyệt đối không cache**: `paymentsApi.getStatus` và `ordersApi.lookup` dùng `cache: "no-store"`; trang `/don-hang/[orderNumber]` khai báo `export const dynamic = "force-dynamic"`; backend trả `Cache-Control: no-store` cho endpoint payment-status. Một response cũ ở đây nghĩa là khách đã trả tiền mà vẫn thấy "chờ thanh toán".
+- **Dữ liệu thanh toán tuyệt đối không cache**: `paymentsApi.getStatus` và `ordersApi.lookup` dùng `cache: "no-store"`; trang `/orders/[orderNumber]` khai báo `export const dynamic = "force-dynamic"`; backend trả `Cache-Control: no-store` cho endpoint payment-status. Một response cũ ở đây nghĩa là khách đã trả tiền mà vẫn thấy "chờ thanh toán".
 - SEO: `sitemap.ts` + `robots.ts` sinh động, `generateMetadata` per-page, JSON-LD trên PDP. Trang thanh toán và đơn hàng đều `noindex`.
 
 ### 8.3 State
@@ -827,7 +827,7 @@ Storefront layout fetch categories + settings ngay lúc SSR → chạy frontend 
 | Thêm loại email mới cho payment | Thêm giá trị vào `PaymentEmailKind` + 4 field `<kind>*` trên Payment + 1 entry trong `EMAIL_DELIVERIES` |
 | Đổi nhà cung cấp email | Class mới trong [email/](backend/src/email/) + đăng ký ở [email/index.ts](backend/src/email/index.ts) |
 | Đổi quy tắc trạng thái đơn | [payment.service.ts](backend/src/services/payment.service.ts) (tự động) + [order.service.ts](backend/src/services/order.service.ts) (thủ công) |
-| Đổi nhịp polling của trang thanh toán | `POLL_INTERVAL_MS` trong [payment-content.tsx](frontend/src/app/(storefront)/thanh-toan/[orderNumber]/payment-content.tsx) (nhớ cân với limiter ở [order.routes.ts](backend/src/routes/order.routes.ts)) |
+| Đổi nhịp polling của trang thanh toán | `POLL_INTERVAL_MS` trong [payment-content.tsx](frontend/src/app/(storefront)/checkout/[orderNumber]/payment-content.tsx) (nhớ cân với limiter ở [order.routes.ts](backend/src/routes/order.routes.ts)) |
 | Thêm trường vào sản phẩm | [Product.model.ts](backend/src/models/Product.model.ts) + [product.validators.ts](backend/src/validators/product.validators.ts) + [product-form.tsx](frontend/src/components/admin/product-form.tsx) |
 | Đổi màu / typography | [globals.css](frontend/src/app/globals.css) |
 | Thêm route API | `routes/` → `controllers/` → `services/` → `repositories/` (đúng thứ tự tầng) |

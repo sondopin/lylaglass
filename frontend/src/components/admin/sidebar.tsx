@@ -16,15 +16,15 @@ import {
 import { cn } from "@/lib/utils";
 
 const NAV = [
-  { href: "/quan-tri", label: "Tổng quan", icon: LayoutDashboard },
-  { href: "/quan-tri/san-pham", label: "Sản phẩm", icon: Package },
-  { href: "/quan-tri/danh-muc", label: "Danh mục", icon: FolderTree },
-  { href: "/quan-tri/don-hang", label: "Đơn hàng", icon: ShoppingCart },
-  { href: "/quan-tri/khach-hang", label: "Khách hàng", icon: Users },
-  { href: "/quan-tri/ton-kho", label: "Tồn kho", icon: Boxes },
-  { href: "/quan-tri/ma-giam-gia", label: "Mã giảm giá", icon: TicketPercent },
-  { href: "/quan-tri/thanh-toan", label: "Thanh toán", icon: CreditCard },
-  { href: "/quan-tri/van-chuyen", label: "Vận chuyển", icon: Truck },
+  { href: "/admin", label: "Tổng quan", icon: LayoutDashboard },
+  { href: "/admin/products", label: "Sản phẩm", icon: Package },
+  { href: "/admin/categories", label: "Danh mục", icon: FolderTree },
+  { href: "/admin/orders", label: "Đơn hàng", icon: ShoppingCart },
+  { href: "/admin/customers", label: "Khách hàng", icon: Users },
+  { href: "/admin/inventory", label: "Tồn kho", icon: Boxes },
+  { href: "/admin/coupons", label: "Mã giảm giá", icon: TicketPercent },
+  { href: "/admin/payments", label: "Thanh toán", icon: CreditCard },
+  { href: "/admin/shipping", label: "Vận chuyển", icon: Truck },
 ];
 
 export function AdminSidebar() {
@@ -35,7 +35,7 @@ export function AdminSidebar() {
       <div className="flex h-16 items-center px-6 font-heading text-lg font-semibold italic">LylaGlass Admin</div>
       <nav className="flex flex-col gap-0.5 px-3">
         {NAV.map((item) => {
-          const active = item.href === "/quan-tri" ? pathname === item.href : pathname.startsWith(item.href);
+          const active = item.href === "/admin" ? pathname === item.href : pathname.startsWith(item.href);
           return (
             <Link
               key={item.href}

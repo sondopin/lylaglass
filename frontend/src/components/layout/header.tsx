@@ -14,9 +14,9 @@ import { cn } from "@/lib/utils";
 
 const STATIC_LINKS = [
   { href: "/", label: "Trang chủ" },
-  { href: "/san-pham", label: "Tất cả sản phẩm" },
-  { href: "/gioi-thieu", label: "Giới thiệu" },
-  { href: "/lien-he", label: "Liên hệ" },
+  { href: "/products", label: "Tất cả sản phẩm" },
+  { href: "/about", label: "Giới thiệu" },
+  { href: "/contact", label: "Liên hệ" },
 ];
 
 export function Header({ categories }: { categories: Category[] }) {
@@ -30,7 +30,7 @@ export function Header({ categories }: { categories: Category[] }) {
 
   const navLinks = [
     STATIC_LINKS[0],
-    ...categories.map((c) => ({ href: `/danh-muc/${c.slug}`, label: c.name })),
+    ...categories.map((c) => ({ href: `/categories/${c.slug}`, label: c.name })),
     STATIC_LINKS[1],
     ...STATIC_LINKS.slice(2),
   ];
@@ -38,7 +38,7 @@ export function Header({ categories }: { categories: Category[] }) {
   function submitSearch(e: React.FormEvent) {
     e.preventDefault();
     if (!query.trim()) return;
-    router.push(`/tim-kiem?q=${encodeURIComponent(query.trim())}`);
+    router.push(`/search?q=${encodeURIComponent(query.trim())}`);
     setSearchOpen(false);
   }
 
@@ -111,7 +111,7 @@ export function Header({ categories }: { categories: Category[] }) {
             </Button>
           )}
 
-          <Button variant="ghost" size="icon" aria-label="Tra cứu đơn hàng" render={<Link href="/tra-cuu-don-hang" />}>
+          <Button variant="ghost" size="icon" aria-label="Tra cứu đơn hàng" render={<Link href="/track-order" />}>
             <PackageSearch className="size-5" />
           </Button>
 

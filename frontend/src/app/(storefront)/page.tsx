@@ -25,14 +25,14 @@ export default async function HomePage() {
         heading="Hàng mới về"
         subheading="Những thiết kế mới thắp sáng ngày của bạn"
         products={newArrivals.items}
-        viewMoreHref="/san-pham?sort=newest"
+        viewMoreHref="/products?sort=newest"
       />
       <AboutSplit />
       <ProductSection
         heading="Bán chạy nhất"
         subheading="Được yêu thích nhất bởi khách hàng LylaGlass"
         products={bestsellers.items}
-        viewMoreHref="/san-pham?sort=bestselling"
+        viewMoreHref="/products?sort=bestselling"
       />
       <FaqSection />
       <ContactFormSection />

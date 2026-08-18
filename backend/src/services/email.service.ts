@@ -41,7 +41,7 @@ function escapeHtml(value: string): string {
 
 function orderLookupUrl(order: OrderRecord): string {
   const base = env.storefrontUrl.replace(/\/$/, "");
-  return `${base}/don-hang/${encodeURIComponent(order.orderNumber)}?email=${encodeURIComponent(orderCustomer(order).email)}`;
+  return `${base}/orders/${encodeURIComponent(order.orderNumber)}?email=${encodeURIComponent(orderCustomer(order).email)}`;
 }
 
 function addressLines(order: OrderRecord): string {
@@ -188,7 +188,7 @@ export async function sendPaymentConfirmationEmail(order: OrderRecord, payment: 
 
 function adminOrderUrl(order: OrderRecord): string {
   const base = env.storefrontUrl.replace(/\/$/, "");
-  return `${base}/quan-tri/don-hang/${String(order._id)}`;
+  return `${base}/admin/orders/${String(order._id)}`;
 }
 
 /**

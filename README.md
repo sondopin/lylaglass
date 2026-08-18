@@ -88,7 +88,7 @@ npm run dev               # http://localhost:3000
 
 ### 4. Đăng nhập quản trị
 
-Truy cập `http://localhost:3000/quan-tri/dang-nhap` với thông tin đã đặt ở
+Truy cập `http://localhost:3000/admin/login` với thông tin đã đặt ở
 `ADMIN_SEED_EMAIL` / `ADMIN_SEED_PASSWORD` trong `backend/.env`.
 
 **Nếu báo "Email hoặc mật khẩu không đúng"**: `npm run seed` chỉ tạo admin khi

@@ -48,7 +48,7 @@ async function seed() {
       flatShippingFee: 30_000,
       storeName: "LylaGlass",
       supportEmail: "hello@lylaglass.vn",
-      supportPhone: "1900 636 999",
+      supportPhone: "0333 971 738",
     },
     { upsert: true }
   );

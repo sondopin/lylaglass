@@ -43,7 +43,7 @@ export function ProductCard({ product }: { product: Product }) {
   }
 
   return (
-    <Link href={`/san-pham/${product.slug}`} className="group flex flex-col text-left">
+    <Link href={`/products/${product.slug}`} className="group flex flex-col text-left">
       <div className="relative aspect-square overflow-hidden rounded-lg bg-muted">
         {image && (
           <Image

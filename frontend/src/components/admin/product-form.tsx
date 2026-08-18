@@ -163,7 +163,7 @@ export function ProductForm({ product }: { product?: Product }) {
     onSuccess: () => {
       toast.success(product ? "Đã cập nhật sản phẩm" : "Đã tạo sản phẩm");
       queryClient.invalidateQueries({ queryKey: ["admin", "products"] });
-      router.push("/quan-tri/san-pham");
+      router.push("/admin/products");
     },
     onError: (err) => toast.error(err instanceof ApiClientError ? err.message : "Có lỗi xảy ra"),
   });
@@ -250,7 +250,7 @@ export function ProductForm({ product }: { product?: Product }) {
                 {!isLoadingCategories && !categoriesFailed && categories.length === 0 && (
                   <p className="text-xs text-muted-foreground">
                     Cần tạo danh mục trước khi thêm sản phẩm —{" "}
-                    <Link href="/quan-tri/danh-muc" className="underline underline-offset-2">
+                    <Link href="/admin/categories" className="underline underline-offset-2">
                       đi tới trang Danh mục
                     </Link>
                     .
@@ -566,7 +566,7 @@ export function ProductForm({ product }: { product?: Product }) {
         </section>
 
         <div className="flex justify-end gap-3">
-          <Button type="button" variant="outline" className="rounded-full" onClick={() => router.push("/quan-tri/san-pham")}>
+          <Button type="button" variant="outline" className="rounded-full" onClick={() => router.push("/admin/products")}>
             Huỷ
           </Button>
           <Button type="submit" className="rounded-full" disabled={saveMutation.isPending}>

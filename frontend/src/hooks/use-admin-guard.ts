@@ -17,7 +17,7 @@ export function useAdminGuard() {
 
   useEffect(() => {
     if (hydrated && !token) {
-      router.replace("/quan-tri/dang-nhap");
+      router.replace("/admin/login");
     }
   }, [hydrated, token, router]);
 

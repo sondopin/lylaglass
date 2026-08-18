@@ -29,7 +29,7 @@ export function CartDrawer() {
         {items.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center text-muted-foreground">
             <p>Giỏ hàng đang trống.</p>
-            <Button onClick={closeDrawer} variant="secondary" className="rounded-full" render={<Link href="/san-pham" />}>
+            <Button onClick={closeDrawer} variant="secondary" className="rounded-full" render={<Link href="/products" />}>
               Khám phá sản phẩm
             </Button>
           </div>
@@ -86,14 +86,14 @@ export function CartDrawer() {
                 <span className="font-semibold text-foreground">{formatVnd(subtotal)}</span>
               </div>
               <p className="mt-1 text-xs text-muted-foreground">
-                Phí vận chuyển và <Link href="/gio-hang" className="underline">mã giảm giá</Link> được tính ở bước thanh toán.
+                Phí vận chuyển và <Link href="/cart" className="underline">mã giảm giá</Link> được tính ở bước thanh toán.
               </p>
               <Separator className="my-4" />
               <div className="flex flex-col gap-2">
-                <Button variant="outline" className="rounded-full" onClick={closeDrawer} render={<Link href="/gio-hang" />}>
+                <Button variant="outline" className="rounded-full" onClick={closeDrawer} render={<Link href="/cart" />}>
                   Xem giỏ hàng
                 </Button>
-                <Button className="rounded-full" onClick={closeDrawer} render={<Link href="/thanh-toan" />}>
+                <Button className="rounded-full" onClick={closeDrawer} render={<Link href="/checkout" />}>
                   Thanh toán — {formatVnd(subtotal)}
                 </Button>
               </div>

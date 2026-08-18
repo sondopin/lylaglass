@@ -15,7 +15,7 @@ export function AboutSplit() {
             thiết kế — từ ly quà tặng đóng hộp tinh tế, bộ sưu tập theo mùa lễ hội, đến những chiếc ly dùng mỗi ngày
             — với mong muốn mỗi lần bạn cầm ly lên đều là một khoảnh khắc nhỏ đáng nhớ.
           </p>
-          <Button variant="outline" className="mt-2 rounded-full px-7" render={<Link href="/gioi-thieu" />}>
+          <Button variant="outline" className="mt-2 rounded-full px-7" render={<Link href="/about" />}>
             Tìm hiểu thêm
           </Button>
         </div>

@@ -11,7 +11,7 @@ const FALLBACK_SETTINGS: Settings = {
   flatShippingFee: 30_000,
   storeName: "LylaGlass",
   supportEmail: "hello@lylaglass.vn",
-  supportPhone: "1900 636 999",
+  supportPhone: "0333 971 738",
 };
 
 async function getLayoutData(): Promise<{ categories: Category[]; settings: Settings }> {

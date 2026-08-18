@@ -18,7 +18,7 @@ export function AdminTopbar() {
         className="rounded-full"
         onClick={() => {
           logout();
-          router.push("/quan-tri/dang-nhap");
+          router.push("/admin/login");
         }}
       >
         Đăng xuất

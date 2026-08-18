@@ -16,7 +16,7 @@ export function CategoryGrid({ categories }: { categories: Category[] }) {
 
       <div className="mx-auto grid max-w-4xl grid-cols-1 gap-10 sm:grid-cols-3">
         {categories.map((category) => (
-          <Link key={category.slug} href={`/danh-muc/${category.slug}`} className="group flex flex-col items-center gap-4 text-center">
+          <Link key={category.slug} href={`/categories/${category.slug}`} className="group flex flex-col items-center gap-4 text-center">
             <div className="relative size-40 overflow-hidden rounded-full ring-1 ring-border sm:size-48">
               {category.image && (
                 <Image

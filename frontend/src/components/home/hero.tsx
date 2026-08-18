@@ -21,7 +21,7 @@ export function Hero() {
           Mang khoảnh khắc ấm áp vào từng chiếc ly
         </h1>
         <p className="text-sm text-white/90 sm:text-base">Quà Tặng · Theo Mùa · Tâm Trạng Mỗi Ngày</p>
-        <Button size="lg" className="mt-2 rounded-full px-8" render={<Link href="/san-pham" />}>
+        <Button size="lg" className="mt-2 rounded-full px-8" render={<Link href="/products" />}>
           Mua sắm ngay
         </Button>
       </div>

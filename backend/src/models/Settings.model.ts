@@ -8,7 +8,7 @@ const settingsSchema = new Schema(
     flatShippingFee: { type: Number, default: 30_000 },
     storeName: { type: String, default: "LylaGlass" },
     supportEmail: { type: String, default: "hello@lylaglass.vn" },
-    supportPhone: { type: String, default: "1900 636 999" },
+    supportPhone: { type: String, default: "0333 971 738" },
   },
   { timestamps: true }
 );

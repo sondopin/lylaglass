@@ -1,4 +1,4 @@
-import mongoose, { ClientSession } from "mongoose";
+import mongoose, { ClientSession, Model } from "mongoose";
 import { env } from "./env";
 import { logger } from "./logger";
 
@@ -103,10 +103,65 @@ export async function ensureCriticalIndexes(): Promise<void> {
   const started = Date.now();
 
   for (const model of models) {
+    await dropSupersededTextIndex(model);
     await model.createIndexes();
   }
 
   logger.info({ models: models.length, ms: Date.now() - started }, "MongoDB indexes ensured");
+}
+
+/** The text-index fields a schema declares, sorted; empty when it declares none. */
+function declaredTextFields(model: Model<unknown>): string[] {
+  const declared = model.schema.indexes().find(([fields]) => Object.values(fields).includes("text"));
+  if (!declared) return [];
+  return Object.keys(declared[0])
+    .filter((field) => declared[0][field] === "text")
+    .sort();
+}
+
+/**
+ * MongoDB allows at most **one text index per collection** and rejects a second
+ * one even under a different name (`IndexOptionsConflict`, code 85). So when the
+ * searchable fields of a schema change — Product's text index moved from
+ * `description` to `shortDescription` — the index already in the database is not
+ * merely stale: it permanently blocks the new one, and because
+ * `ensureCriticalIndexes()` fails fast, every boot dies with it.
+ *
+ * Dropping the old index is therefore the only migration path, and it is a safe
+ * one: a text index enforces no constraint and stores no data of its own, so the
+ * `createIndexes()` call right after this rebuilds it from the current schema.
+ * Search is unavailable only for the seconds the rebuild takes.
+ *
+ * Indexes whose fields already match are left untouched, which keeps this a
+ * no-op on every boot after the first.
+ */
+async function dropSupersededTextIndex(model: Model<unknown>): Promise<void> {
+  const wanted = declaredTextFields(model);
+  if (wanted.length === 0) return;
+
+  let indexes: { name?: string; key?: Record<string, unknown>; weights?: Record<string, number> }[];
+  try {
+    indexes = await model.collection.indexes();
+  } catch (err) {
+    // NamespaceNotFound (26): the collection does not exist yet, so nothing can
+    // conflict — createIndexes() will create it along with the index.
+    if ((err as { code?: number }).code === 26) return;
+    throw err;
+  }
+
+  // A text index is stored with the synthetic key `{ _fts: "text", _ftsx: 1 }`;
+  // the indexed fields appear in `weights` instead.
+  const existing = indexes.find((index) => index.key?._fts === "text");
+  if (!existing?.name) return;
+
+  const current = Object.keys(existing.weights ?? {}).sort();
+  if (current.length === wanted.length && current.every((field, i) => field === wanted[i])) return;
+
+  await model.collection.dropIndex(existing.name);
+  logger.info(
+    { collection: model.collection.collectionName, dropped: existing.name, from: current, to: wanted },
+    "Đã xoá text index cũ không khớp schema để tạo lại (MongoDB chỉ cho phép 1 text index / collection)"
+  );
 }
 
 /**
