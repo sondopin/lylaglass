@@ -10,6 +10,7 @@
     "start": "node dist/server.js",
     "lint": "eslint src --ext .ts",
     "seed": "tsx src/seed/seed.ts",
+    "admin": "tsx src/scripts/adminAccount.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "migrate:vietqr": "tsx src/scripts/migrateVietqrPayments.ts"

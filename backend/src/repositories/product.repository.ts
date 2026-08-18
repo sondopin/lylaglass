@@ -1,4 +1,4 @@
-import { FilterQuery, SortOrder, Types } from "mongoose";
+import { ClientSession, FilterQuery, SortOrder, Types } from "mongoose";
 import { ProductModel, Product } from "@/models/Product.model";
 
 export interface ProductListFilters {
@@ -64,7 +64,12 @@ export const productRepository = {
 
   findBySlug: (slug: string) => ProductModel.findOne({ slug, status: "active" }).populate("categoryId", "name slug").lean(),
   findBySlugAdmin: (slug: string) => ProductModel.findOne({ slug }).lean(),
-  findById: (id: string) => ProductModel.findById(id).lean(),
+  /**
+   * Reading inside the checkout transaction matters: with `readConcern:
+   * majority` the price and stock this returns are guaranteed not to be rolled
+   * back under the order that gets written from them.
+   */
+  findById: (id: string, session?: ClientSession) => ProductModel.findById(id).session(session ?? null).lean(),
   findByIdAdmin: (id: string) => ProductModel.findById(id).lean(),
 
   findRelated: (categoryId: Types.ObjectId, excludeId: Types.ObjectId, limit = 4) =>
@@ -77,24 +82,39 @@ export const productRepository = {
 
   /**
    * Atomically decrements a variant's inventory only if enough stock is
-   * available. MongoDB applies the filter + update as one atomic document
-   * operation, so concurrent checkouts for the same SKU can never both
-   * succeed past the available quantity (no negative stock, no lost updates).
+   * available. The `inventoryQty >= quantity` guard lives in the *filter*, so
+   * MongoDB applies test-and-decrement as one indivisible document operation:
+   * concurrent checkouts for the same SKU can never both succeed past the
+   * available quantity (no negative stock, no lost updates).
+   *
+   * Inside a transaction this additionally becomes atomic *with* the order that
+   * is written from it — a second session touching the same product raises a
+   * write conflict, which `withTransaction` retries automatically.
    */
-  async decrementVariantStock(productId: Types.ObjectId | string, sku: string, quantity: number) {
+  async decrementVariantStock(
+    productId: Types.ObjectId | string,
+    sku: string,
+    quantity: number,
+    session?: ClientSession
+  ) {
     const result = await ProductModel.findOneAndUpdate(
       { _id: productId, variants: { $elemMatch: { sku, inventoryQty: { $gte: quantity } } } },
       { $inc: { "variants.$[v].inventoryQty": -quantity } },
-      { arrayFilters: [{ "v.sku": sku }], new: true }
+      { arrayFilters: [{ "v.sku": sku }], new: true, session }
     ).lean();
     return result; // null means insufficient stock / not found -> caller must treat as failure
   },
 
-  async restockVariant(productId: Types.ObjectId | string, sku: string, quantity: number) {
+  async restockVariant(
+    productId: Types.ObjectId | string,
+    sku: string,
+    quantity: number,
+    session?: ClientSession
+  ) {
     return ProductModel.findOneAndUpdate(
       { _id: productId, "variants.sku": sku },
       { $inc: { "variants.$[v].inventoryQty": quantity } },
-      { arrayFilters: [{ "v.sku": sku }], new: true }
+      { arrayFilters: [{ "v.sku": sku }], new: true, session }
     ).lean();
   },
 

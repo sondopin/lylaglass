@@ -50,7 +50,7 @@ Phương thức thanh toán duy nhất là **chuyển khoản ngân hàng qua Vi
 |---|---|---|
 | Runtime / ngôn ngữ | Node.js + TypeScript 5.7 | `tsx watch` khi dev, `tsc` + `tsc-alias` khi build (alias `@/*` → `src/*`) |
 | Web framework | Express 4.21 | |
-| Database | MongoDB 7 + Mongoose 8 | Docker container `lylaglass-mongo` |
+| Database | MongoDB 7 + Mongoose 8 | **MongoDB Atlas M0** ở production; local là single-node replica set `rs0` trong Docker. Bắt buộc replica set vì checkout/thanh toán chạy trong transaction |
 | Validation | Zod 3 | Schema đặt ở `validators/`, áp qua middleware `validate()` |
 | Auth | `jsonwebtoken` + `bcryptjs` | JWT HS256, chỉ cho admin |
 | Bảo mật | `helmet`, `cors`, `express-rate-limit` | Rate limit 300 req / 15 phút trên `/api` |
@@ -58,8 +58,8 @@ Phương thức thanh toán duy nhất là **chuyển khoản ngân hàng qua Vi
 | Upload ảnh | `multer` (memory) + Cloudinary SDK | Buffer → stream thẳng lên Cloudinary, không lưu đĩa |
 | Sinh mã | `nanoid` | Order number + payment code (alphabet không có ký tự dễ nhầm) |
 | QR thanh toán | `qrcode` | Render VietQR thành PNG data URI ngay trong process (không gửi STK cho dịch vụ ảnh bên thứ ba) |
-| Email | Resend REST API qua `fetch` | Không thêm SDK; provider `log` ghi ra log khi dev |
-| Test | Vitest 4 | `npm test`, alias `@/*` khớp tsconfig, repository được stub nên không cần DB |
+| Email | **Gmail API** (OAuth2 refresh token) qua `fetch` | Không thêm SDK; tự dựng MIME đa phần + mã hoá RFC 2047 cho tiếng Việt; provider `log` ghi ra log khi dev |
+| Test | Vitest 4 | `npm test` chạy 104 test. Test unit stub repository (không cần DB); test integration (`tests/integration/`) chạy trên replica set thật và tự bỏ qua nếu không kết nối được |
 
 ### Frontend — [frontend/](frontend/)
 
@@ -104,7 +104,7 @@ Các tầng ngang được dùng xuyên suốt:
 - **`payments/`** — hai abstraction tách biệt theo trách nhiệm:
   - [PaymentProvider.ts](backend/src/payments/PaymentProvider.ts) → tạo hướng dẫn thanh toán. `VietQRPaymentProvider` sinh payload VietQR ([vietqrPayload.ts](backend/src/payments/vietqrPayload.ts)) và render QR ([qrImage.ts](backend/src/payments/qrImage.ts)). **Không có hàm nào xác nhận thanh toán.**
   - [BankNotificationProvider.ts](backend/src/payments/BankNotificationProvider.ts) → xác thực + chuẩn hoá thông báo tiền vào. `SePayBankNotificationProvider` là nơi duy nhất biến một HTTP request thành một giao dịch đáng tin.
-- **`email/`** — abstraction gửi email (`ResendEmailProvider`, `LogEmailProvider`), dùng bởi [email.service.ts](backend/src/services/email.service.ts).
+- **`email/`** — abstraction gửi email (`GmailEmailProvider`, `LogEmailProvider`) + [mime.ts](backend/src/email/mime.ts) (dựng RFC 2822, mã hoá tiêu đề tiếng Việt, chặn header injection), dùng bởi [email.service.ts](backend/src/services/email.service.ts).
 - **`jobs/`** — [paymentExpiry.job.ts](backend/src/jobs/paymentExpiry.job.ts): quét payment quá hạn và gửi lại email thất bại.
 - **`utils/`** — `ApiError` (lỗi có status code), `asyncHandler` (bắt lỗi async cho Express 4), `apiResponse` (chuẩn hoá response), `orderNumber` (sinh mã đơn), `paymentCode` (sinh/nhận dạng mã thanh toán).
 
@@ -653,7 +653,37 @@ SePay là **lớp thông báo**, không phải lớp giữ tiền: nó không ba
 
 **Coupon**: lượt dùng được `$inc` ngay ở checkout (để chặn vượt `usageLimit` khi nhiều khách đặt cùng lúc), nên bắt buộc phải hoàn lại khi đơn không được thanh toán — `decrementUsage` có điều kiện `usageCount > 0` để không bao giờ âm.
 
-> **Hạn chế đã biết**: MongoDB transaction (multi-document) **không** được dùng. Trừ kho tuần tự từng SKU + rollback thủ công là "compensating transaction" chứ không phải ACID thật. Nếu process crash đúng giữa vòng lặp reserve, một phần kho sẽ bị giữ vĩnh viễn (job hết hạn chỉ dọn được kho của những Order đã kịp tạo Payment). Muốn chặt chẽ hơn thì cần replica set + `session.withTransaction()`.
+### 7.8 Transaction — checkout và thanh toán chạy ACID
+
+Toàn bộ phần "phải đúng cùng nhau" nằm trong **một transaction MongoDB** ([db.ts](backend/src/config/db.ts) → `withTransaction`):
+
+| Nghiệp vụ | Nằm trong 1 transaction |
+|---|---|
+| `processCheckout` | đọc product → trừ kho từng SKU → claim lượt coupon → tạo Order → tạo Payment → gán `paymentId` |
+| `settlePayment` (webhook tiền vào) | `markSucceeded` trên Payment + chuyển Order sang `paid`/`confirmed` |
+| `expirePayment` (hết TTL) | `markClosed` + Order `cancelled` + hoàn kho + hoàn lượt coupon |
+| `cancelOrder` (admin) | Order `cancelled` + hoàn kho + hoàn lượt coupon |
+
+Bốn nguyên tắc được giữ nghiêm ngặt:
+
+1. **Không side effect ngoài DB bên trong transaction.** `withTransaction` có thể **chạy lại callback** khi gặp write conflict, nên email, render QR (tốn CPU) và cập nhật thống kê khách hàng đều nằm **sau commit**. Gửi email bên trong transaction sẽ gửi trùng khi retry.
+2. **Không `Promise.all` trên cùng một session.** `ClientSession` không mang được thao tác song song; mọi vòng lặp trong transaction (trừ kho, hoàn kho) chạy **tuần tự**.
+3. **Vẫn giữ nguyên các atomic claim.** `inventoryReleased` / `couponUsageReleased` / `markSucceeded` có điều kiện trạng thái vẫn còn — chúng là thứ bảo vệ chế độ degraded và không tốn gì khi có transaction.
+4. **Read/write concern = `majority`.** Checkout trả về thành công nghĩa là đã được đa số node Atlas xác nhận, một lần failover không thể nuốt mất đơn.
+
+**Phát hiện topology tự động** ([db.ts](backend/src/config/db.ts)): sau khi connect, server chạy `hello` để xác định có phải replica set/sharded không.
+- Có → transaction thật.
+- Không → **production từ chối khởi động** (`MONGODB_REQUIRE_TRANSACTIONS=true`); dev chỉ cảnh báo và rơi về đường compensating cũ, nên vẫn code được ở máy không có replica set.
+
+**Index là cơ chế đúng đắn, không chỉ để nhanh.** `autoIndex` tắt, thay bằng `ensureCriticalIndexes()` chạy lúc boot (và trong `npm run seed`). Bốn unique index dưới đây *chính là* thứ tạo ra tính idempotent, thiếu chúng thì webhook trùng sẽ ghi nhận 2 lần:
+`Payment.idempotencyKey`, `Payment.paymentCode`, `Payment.transactionId` (partial), `BankTransaction(provider, providerTransactionId)`.
+
+**Đã kiểm chứng thực tế** trên replica set thật (`tests/integration/checkout.integration.test.ts`):
+- 8 khách mua đồng thời 1 sản phẩm, kho còn 3 → **đúng 3 đơn thành công**, 5 đơn nhận 409, kho về 0, không có Order/Payment mồ côi.
+- 6 khách dùng đồng thời coupon `usageLimit: 2` → **đúng 2 đơn thành công**, `usageCount` đúng bằng 2, 4 đơn thất bại **không** tiêu kho.
+- Checkout lỗi giữa chừng → **không để lại gì**: 0 Order, 0 Payment, kho nguyên vẹn.
+
+> **Hạn chế còn lại**: `BankTransaction.insertIfNew` (chốt chống trùng webhook) nằm **ngoài** transaction đối soát — cố ý, để giao dịch luôn được ghi lại kể cả khi không khớp đơn nào. Nếu process chết đúng giữa ghi nhận và đối soát, bản ghi ở trạng thái `unmatched`; lần retry sau của SePay sẽ **được phép chạy lại** đối soát (chỉ bản ghi đã `matched` mới bị bỏ qua), nên không mất tiền.
 
 ---
 
@@ -737,8 +767,12 @@ BANK_WEBHOOK_SECRET                           # bí mật HMAC-SHA256 (mode hmac
 BANK_WEBHOOK_API_KEY                          # key SePay gửi kèm `Authorization: Apikey …`
 BANK_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS=300
 
-# Email xác nhận thanh toán
-EMAIL_PROVIDER=log|resend, EMAIL_API_KEY, EMAIL_FROM, EMAIL_REPLY_TO, EMAIL_MAX_ATTEMPTS=3
+# Email — Gmail API (OAuth2 refresh token)
+EMAIL_PROVIDER=log|gmail
+GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET          # OAuth client "Desktop app"
+GMAIL_REFRESH_TOKEN                           # lấy 1 lần offline, scope gmail.send
+GMAIL_SENDER                                  # hộp thư sở hữu refresh token
+EMAIL_FROM, EMAIL_REPLY_TO, EMAIL_MAX_ATTEMPTS=3
 ORDER_NOTIFICATION_EMAILS                     # email shop nhận thông báo đơn mới
                                               # (cách nhau bằng phẩy; trống = tắt)
 
@@ -752,9 +786,21 @@ Frontend: `NEXT_PUBLIC_API_URL` (mặc định `http://localhost:4000/api`), `NE
 ### Khởi động
 
 ```bash
+# Mongo chạy dạng single-node replica set (rs0); healthcheck tự rs.initiate()
 docker compose up -d mongo
 cd backend  && cp .env.example .env && npm i && npm run seed && npm run dev   # :4000
 cd frontend && cp .env.example .env.local && npm i && npm run dev             # :3000
+```
+
+> **Chỉ file `.env` được nạp** (`dotenv/config`), không phải `.env.local` — đó là file của frontend.
+
+**Kết nối MongoDB.** Từ máy host bắt buộc có `directConnection=true`: replica set khai báo member là `mongo:27017`, chỉ phân giải được bên trong mạng Docker.
+
+```
+# Local
+mongodb://localhost:27017/lylaglass?replicaSet=rs0&directConnection=true
+# Production — Atlas M0 (free, luôn là replica set 3 node → có transaction + backup)
+mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/lylaglass?retryWrites=true&w=majority
 ```
 
 `npm run seed` xoá sạch Categories/Products/Coupons/Reviews rồi tạo lại; Settings & AdminUser dùng upsert nên **không mất tài khoản admin** khi seed lại.
@@ -791,11 +837,13 @@ Storefront layout fetch categories + settings ngay lúc SSR → chạy frontend 
 
 ## 11. Giới hạn đã biết
 
-1. **Chưa có test e2e UI** — đã có 50 test Vitest ở tầng service/provider (VietQR, xác thực webhook, toàn bộ quy tắc đối soát, hết hạn, idempotency email) với repository được stub, nhưng chưa có Playwright cho luồng giao diện.
-2. **Không dùng MongoDB transaction** — xem §7.7.
+1. **Chưa có test e2e UI** — đã có 104 test Vitest: unit ở tầng service/provider (VietQR, xác thực webhook, toàn bộ quy tắc đối soát, hết hạn, idempotency email, MIME/Gmail) và integration chạy trên replica set thật (transaction, tranh chấp tồn kho, tranh chấp coupon). Chưa có Playwright cho luồng giao diện.
+2. **Job hết hạn & retry email chạy trong process API** — xem mục 5 bên dưới.
 3. **Chuyển thừa tiền / tiền về sau hạn không tự động xác nhận** — cố ý: giao dịch được ghi lại và payment gắn cờ `needsManualReview`, admin xử lý tại Quản trị → Thanh toán. Nếu muốn tự động, phải định nghĩa quy tắc business trước (hoàn phần dư? chấp nhận? tạo lại đơn?).
 4. **Email idempotency dùng trạng thái trên Payment, không phải Outbox pattern** — an toàn (claim atomic, không gửi trùng) nhưng nếu process crash đúng giữa lúc `sending` thì email đó cần admin gửi lại thủ công; job chỉ retry các bản `failed`/`pending`.
 5. **Job hết hạn chạy trong process API** — chạy nhiều instance vẫn đúng (mọi transition đều atomic) nhưng lặp công vô ích; nếu scale ngang nên tắt bằng `PAYMENT_EXPIRY_SWEEP_INTERVAL_MS=0` ở các instance phụ.
+
+12. **Hạn ngạch gửi email của Gmail** — ~500 người nhận/ngày với tài khoản @gmail.com, ~2000/ngày với Google Workspace. Ở mức ~5 đơn/ngày (2 email/đơn) còn rất xa ngưỡng, nhưng nếu làm chiến dịch marketing thì phải chuyển sang dịch vụ gửi hàng loạt.
 6. **Không đối soát dòng tiền tự động** — `BankTransaction` là sổ ghi nhận, không phải hệ thống đối soát/sổ quỹ; không có model Payout/Settlement.
 7. **Không có manual override "đã thanh toán" cho admin** — theo thiết kế, để không ai vô tình bỏ qua đối soát. Nếu cần cho ca đặc biệt, phải làm thành chức năng riêng có audit log rõ ràng.
 8. **Review auto-publish** (`isApproved` mặc định `true`) và **không kiểm chứng đã mua hàng** — dễ bị spam.

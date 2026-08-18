@@ -14,7 +14,25 @@ export const env = {
   apiBaseUrl: process.env.API_BASE_URL ?? "http://localhost:4000",
   clientOrigin: process.env.CLIENT_ORIGIN ?? "http://localhost:3000",
 
-  mongodbUri: required("MONGODB_URI", "mongodb://localhost:27017/lylaglass"),
+  /**
+   * Default targets the local single-node replica set from docker-compose.
+   * `directConnection=true` is required from the host: the replica set is
+   * configured with the member host `mongo:27017`, which only resolves inside
+   * the Docker network, so topology discovery has to be bypassed.
+   */
+  mongodbUri: required("MONGODB_URI", "mongodb://localhost:27017/lylaglass?replicaSet=rs0&directConnection=true"),
+
+  mongo: {
+    /** Atlas M0 caps the whole cluster at 500 connections — stay well under it. */
+    maxPoolSize: Number(process.env.MONGODB_MAX_POOL_SIZE ?? 10),
+    serverSelectionTimeoutMs: Number(process.env.MONGODB_SERVER_SELECTION_TIMEOUT_MS ?? 10_000),
+    socketTimeoutMs: Number(process.env.MONGODB_SOCKET_TIMEOUT_MS ?? 45_000),
+    /**
+     * Refuse to serve production traffic against a deployment that cannot run
+     * transactions. Set to false only for a deliberate, documented exception.
+     */
+    requireTransactions: (process.env.MONGODB_REQUIRE_TRANSACTIONS ?? "true") !== "false",
+  },
 
   jwtSecret: required("JWT_SECRET", "dev-only-insecure-secret-change-me"),
   jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? "7d",
@@ -59,10 +77,28 @@ export const env = {
   },
 
   email: {
-    provider: (process.env.EMAIL_PROVIDER ?? "log") as "resend" | "log",
-    apiKey: process.env.EMAIL_API_KEY ?? "",
+    provider: (process.env.EMAIL_PROVIDER ?? "log") as "gmail" | "log",
     from: process.env.EMAIL_FROM ?? "LylaGlass <no-reply@lylaglass.vn>",
     replyTo: process.env.EMAIL_REPLY_TO ?? "",
+
+    /**
+     * Gmail API, OAuth2 refresh-token flow (installed-app credentials).
+     *
+     * The refresh token is issued once, offline, for the mailbox that will send
+     * the mail; the server exchanges it for short-lived access tokens. No
+     * password and no app-specific password is ever stored, and revoking access
+     * in the Google account immediately stops the server sending.
+     */
+    gmail: {
+      clientId: process.env.GMAIL_CLIENT_ID ?? "",
+      clientSecret: process.env.GMAIL_CLIENT_SECRET ?? "",
+      refreshToken: process.env.GMAIL_REFRESH_TOKEN ?? "",
+      /**
+       * The mailbox the refresh token belongs to. Gmail rejects a `From:` that
+       * is neither this address nor one of its verified send-as aliases.
+       */
+      sender: process.env.GMAIL_SENDER ?? "",
+    },
     /** Confirmation emails stop being retried after this many failed attempts. */
     maxAttempts: Number(process.env.EMAIL_MAX_ATTEMPTS ?? 3),
     /**

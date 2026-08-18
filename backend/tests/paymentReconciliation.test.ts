@@ -99,6 +99,18 @@ const couponRepository = vi.hoisted(() => ({
 const sendPaymentConfirmationEmail = vi.hoisted(() => vi.fn());
 const sendNewOrderNotificationEmail = vi.hoisted(() => vi.fn());
 
+/**
+ * Stand-in for a real ClientSession. Asserting that repositories receive *this
+ * exact object* is how these tests prove settlement and expiry run inside a
+ * transaction, rather than merely producing the right end state.
+ */
+const SESSION = vi.hoisted(() => ({ id: "test-session" }) as unknown as import("mongoose").ClientSession);
+
+vi.mock("@/config/db", () => ({
+  supportsTransactions: () => true,
+  withTransaction: vi.fn(async (fn: (session?: unknown) => Promise<unknown>) => fn(SESSION)),
+}));
+
 vi.mock("@/repositories/payment.repository", () => ({ paymentRepository }));
 vi.mock("@/repositories/order.repository", () => ({ orderRepository }));
 vi.mock("@/repositories/bankTransaction.repository", () => ({ bankTransactionRepository }));
@@ -180,7 +192,10 @@ function arrangeOpenPayment(paymentOverrides: Partial<StubPayment> = {}, orderOv
   const order = makeOrder(orderOverrides);
   const payment = makePayment({ orderId: order._id, ...paymentOverrides });
 
-  bankTransactionRepository.insertIfNew.mockResolvedValue({ _id: new Types.ObjectId() });
+  bankTransactionRepository.insertIfNew.mockResolvedValue({
+    record: { _id: new Types.ObjectId(), matchStatus: "unmatched" },
+    isNew: true,
+  });
   bankTransactionRepository.updateById.mockResolvedValue({});
   paymentRepository.findByPaymentCode.mockImplementation(async (code: string) =>
     code === payment.paymentCode ? payment : null
@@ -219,10 +234,11 @@ describe("bank webhook — a valid transfer settles the order", () => {
       referenceCode: "FT26012345678",
       transferredAmount: ORDER_TOTAL,
     });
-    expect(orderRepository.updateById).toHaveBeenCalledWith(String(order._id), {
-      paymentStatus: "paid",
-      orderStatus: "confirmed",
-    });
+    expect(orderRepository.updateById).toHaveBeenCalledWith(
+      String(order._id),
+      { paymentStatus: "paid", orderStatus: "confirmed" },
+      SESSION
+    );
     expect(sendPaymentConfirmationEmail).toHaveBeenCalledTimes(1);
   });
 
@@ -389,7 +405,10 @@ describe("shop owner notification", () => {
     const { body, headers } = webhookRequest(transferPayload());
 
     await handleBankWebhook(body, headers);
-    bankTransactionRepository.insertIfNew.mockResolvedValue(null);
+    bankTransactionRepository.insertIfNew.mockResolvedValue({
+      record: { _id: new Types.ObjectId(), matchStatus: "matched" },
+      isNew: false,
+    });
     await handleBankWebhook(body, headers);
     await handleBankWebhook(body, headers);
 
@@ -411,10 +430,11 @@ describe("shop owner notification", () => {
       "ownerNotification",
       expect.stringContaining("smtp down")
     );
-    expect(orderRepository.updateById).toHaveBeenCalledWith(String(order._id), {
-      paymentStatus: "paid",
-      orderStatus: "confirmed",
-    });
+    expect(orderRepository.updateById).toHaveBeenCalledWith(
+      String(order._id),
+      { paymentStatus: "paid", orderStatus: "confirmed" },
+      SESSION
+    );
   });
 
   it("records a skip instead of sending when no recipient is configured", async () => {
@@ -469,7 +489,10 @@ describe("bank webhook — idempotency", () => {
     expect(first).toMatchObject({ processed: true, duplicate: false });
 
     // Second and third deliveries: the unique index rejects the insert.
-    bankTransactionRepository.insertIfNew.mockResolvedValue(null);
+    bankTransactionRepository.insertIfNew.mockResolvedValue({
+      record: { _id: new Types.ObjectId(), matchStatus: "matched" },
+      isNew: false,
+    });
     const second = await handleBankWebhook(body, headers);
     const third = await handleBankWebhook(body, headers);
 
@@ -514,10 +537,11 @@ describe("bank webhook — idempotency", () => {
     expect(paymentRepository.markSucceeded).toHaveBeenCalledTimes(1);
     expect(paymentRepository.markEmailFailed).toHaveBeenCalled();
     // The order stays confirmed — a failed email never rolls payment back.
-    expect(orderRepository.updateById).toHaveBeenCalledWith(expect.any(String), {
-      paymentStatus: "paid",
-      orderStatus: "confirmed",
-    });
+    expect(orderRepository.updateById).toHaveBeenCalledWith(
+      expect.any(String),
+      { paymentStatus: "paid", orderStatus: "confirmed" },
+      SESSION
+    );
   });
 });
 
@@ -557,12 +581,13 @@ describe("payment expiry", () => {
     const result = await expireOverduePayments();
 
     expect(result).toMatchObject({ scanned: 1, expired: 1 });
-    expect(orderRepository.updateById).toHaveBeenCalledWith(String(order._id), {
-      paymentStatus: "failed",
-      orderStatus: "cancelled",
-    });
+    expect(orderRepository.updateById).toHaveBeenCalledWith(
+      String(order._id),
+      { paymentStatus: "failed", orderStatus: "cancelled" },
+      SESSION
+    );
     expect(productRepository.restockVariant).toHaveBeenCalledTimes(order.items.length);
-    expect(productRepository.restockVariant).toHaveBeenCalledWith(order.items[0].productId, "SKU-1", 2);
+    expect(productRepository.restockVariant).toHaveBeenCalledWith(order.items[0].productId, "SKU-1", 2, SESSION);
   });
 
   it("gives back the coupon use that checkout charged", async () => {

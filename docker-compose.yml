@@ -1,12 +1,33 @@
 services:
+  # Single-node replica set, not a standalone mongod.
+  #
+  # Transactions require a replica set, and checkout/payment settlement now rely
+  # on them. Production runs on MongoDB Atlas (always a replica set, even on the
+  # free M0 tier), so running one node in `rs0` locally keeps development on the
+  # same semantics instead of only discovering the difference in production.
   mongo:
     image: mongo:7
     container_name: lylaglass-mongo
     restart: unless-stopped
+    command: ["--replSet", "rs0", "--bind_ip_all"]
     ports:
       - "27017:27017"
     volumes:
       - mongo-data:/data/db
+    healthcheck:
+      # Initiates the replica set on first boot and reports healthy once a
+      # primary has been elected. `rs.initiate` is idempotent-by-guard: on later
+      # boots `rs.status()` already succeeds and the initiate is skipped.
+      test: >
+        mongosh --quiet --eval "
+          try { rs.status().ok } catch (e) {
+            rs.initiate({_id:'rs0', members:[{_id:0, host:'mongo:27017'}]}).ok
+          }
+        "
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
 
   backend:
     build:
@@ -14,13 +35,19 @@ services:
     container_name: lylaglass-backend
     restart: unless-stopped
     depends_on:
-      - mongo
+      mongo:
+        condition: service_healthy
     ports:
       - "4000:4000"
     environment:
       NODE_ENV: production
       PORT: 4000
-      MONGODB_URI: mongodb://mongo:27017/lylaglass
+      # `directConnection=true` is required when reaching a single-node replica
+      # set by its container name: without it the driver follows the replica set
+      # host list, which advertises `mongo:27017` from inside the cluster.
+      MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017/lylaglass?replicaSet=rs0&directConnection=true}
+      MONGODB_MAX_POOL_SIZE: ${MONGODB_MAX_POOL_SIZE:-10}
+      MONGODB_REQUIRE_TRANSACTIONS: ${MONGODB_REQUIRE_TRANSACTIONS:-true}
       CLIENT_ORIGIN: ${CLIENT_ORIGIN:-http://localhost:3000}
       STOREFRONT_URL: ${STOREFRONT_URL:-http://localhost:3000}
       JWT_SECRET: ${JWT_SECRET}
@@ -45,9 +72,12 @@ services:
       BANK_WEBHOOK_SECRET: ${BANK_WEBHOOK_SECRET}
       BANK_WEBHOOK_API_KEY: ${BANK_WEBHOOK_API_KEY}
       BANK_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS: ${BANK_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS:-300}
-      # Transactional email
+      # Transactional email — Gmail API (OAuth2 refresh token)
       EMAIL_PROVIDER: ${EMAIL_PROVIDER:-log}
-      EMAIL_API_KEY: ${EMAIL_API_KEY}
+      GMAIL_CLIENT_ID: ${GMAIL_CLIENT_ID}
+      GMAIL_CLIENT_SECRET: ${GMAIL_CLIENT_SECRET}
+      GMAIL_REFRESH_TOKEN: ${GMAIL_REFRESH_TOKEN}
+      GMAIL_SENDER: ${GMAIL_SENDER}
       EMAIL_FROM: ${EMAIL_FROM:-LylaGlass <no-reply@lylaglass.vn>}
       EMAIL_REPLY_TO: ${EMAIL_REPLY_TO}
       EMAIL_MAX_ATTEMPTS: ${EMAIL_MAX_ATTEMPTS:-3}

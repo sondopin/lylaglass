@@ -1,3 +1,4 @@
+import { ClientSession } from "mongoose";
 import { PaymentModel } from "@/models/Payment.model";
 
 /** A payment in one of these states will never transition again. */
@@ -19,21 +20,26 @@ export interface MarkSucceededInput {
 }
 
 export const paymentRepository = {
-  create: (data: Record<string, unknown>) => PaymentModel.create(data),
+  /** Array form so Mongoose honours the session (see orderRepository.create). */
+  async create(data: Record<string, unknown>, session?: ClientSession) {
+    const [payment] = await PaymentModel.create([data], session ? { session } : {});
+    return payment;
+  },
   findByIdempotencyKey: (key: string) => PaymentModel.findOne({ idempotencyKey: key }).lean(),
   findByIntentId: (intentId: string) => PaymentModel.findOne({ intentId }).lean(),
-  findByPaymentCode: (paymentCode: string) => PaymentModel.findOne({ paymentCode: paymentCode.toUpperCase() }).lean(),
+  findByPaymentCode: (paymentCode: string, session?: ClientSession) =>
+    PaymentModel.findOne({ paymentCode: paymentCode.toUpperCase() }).session(session ?? null).lean(),
   findByOrderId: (orderId: string) => PaymentModel.findOne({ orderId }).sort({ createdAt: -1 }).lean(),
-  findById: (id: string) => PaymentModel.findById(id).lean(),
-  updateById: (id: string, data: Record<string, unknown>) =>
-    PaymentModel.findByIdAndUpdate(id, data, { new: true, runValidators: true }).lean(),
+  findById: (id: string, session?: ClientSession) => PaymentModel.findById(id).session(session ?? null).lean(),
+  updateById: (id: string, data: Record<string, unknown>, session?: ClientSession) =>
+    PaymentModel.findByIdAndUpdate(id, data, { new: true, runValidators: true, session }).lean(),
 
   /**
    * Atomically moves a still-open payment to `succeeded`. The status guard is
    * part of the query, so concurrent webhook deliveries for the same transfer
    * can never both win — the loser gets `null` and stops.
    */
-  markSucceeded: (id: string, input: MarkSucceededInput) =>
+  markSucceeded: (id: string, input: MarkSucceededInput, session?: ClientSession) =>
     PaymentModel.findOneAndUpdate(
       { _id: id, status: { $nin: TERMINAL_PAYMENT_STATUSES } },
       {
@@ -46,15 +52,15 @@ export const paymentRepository = {
         failureReason: "",
         rawEvent: input.rawEvent,
       },
-      { new: true, runValidators: true }
+      { new: true, runValidators: true, session }
     ).lean(),
 
   /** Atomically closes a still-open payment as `expired` or `failed`. */
-  markClosed: (id: string, status: "expired" | "failed", failureReason: string) =>
+  markClosed: (id: string, status: "expired" | "failed", failureReason: string, session?: ClientSession) =>
     PaymentModel.findOneAndUpdate(
       { _id: id, status: { $nin: TERMINAL_PAYMENT_STATUSES } },
       { status, failureReason },
-      { new: true, runValidators: true }
+      { new: true, runValidators: true, session }
     ).lean(),
 
   flagForManualReview: (id: string, reason: string) =>

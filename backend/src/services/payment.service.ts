@@ -1,6 +1,7 @@
-import { Types } from "mongoose";
+import { ClientSession, Types } from "mongoose";
 import { env } from "@/config/env";
 import { logger } from "@/config/logger";
+import { withTransaction } from "@/config/db";
 import { getBankNotificationProvider, getPaymentProvider, BankTransactionEvent } from "@/payments";
 import { renderQrCodeDataUrl } from "@/payments/qrImage";
 import { paymentRepository, PaymentRecord, PaymentEmailKind } from "@/repositories/payment.repository";
@@ -73,12 +74,16 @@ export function toPublicPaymentView(payment: PaymentRecord): PublicPaymentView {
 }
 
 /**
- * Creates the Payment for a freshly placed order and generates its VietQR.
+ * Creates the Payment record for a freshly placed order, including the VietQR
+ * payload the customer will transfer against.
  *
  * The TTL deadline is computed here, from server time, so reloading the payment
- * page cannot extend it.
+ * page cannot extend it. Deliberately does *not* render the QR image: this runs
+ * inside the checkout transaction, and rasterising a PNG is CPU work with no
+ * reason to hold a transaction open. Callers render it after the commit via
+ * `renderPaymentView`.
  */
-export async function createPaymentForOrder(order: PayableOrder) {
+export async function buildPaymentForOrder(order: PayableOrder, session?: ClientSession): Promise<PaymentRecord> {
   const paymentCode = generatePaymentCode();
   const expiresAt = new Date(Date.now() + env.payment.ttlMinutes * 60_000);
 
@@ -93,32 +98,44 @@ export async function createPaymentForOrder(order: PayableOrder) {
     expiresAt,
   });
 
-  const payment = await paymentRepository.create({
-    orderId: order._id,
-    provider: provider.name,
-    intentId: intent.intentId,
-    // One payment per order: a refreshed checkout can never spawn a second one.
-    idempotencyKey: `checkout_${order._id}`,
-    amount: order.total,
-    currency: order.currency,
-    status: intent.status,
-    method: intent.method,
-    paymentCode,
-    bankBin: intent.bank.bin,
-    bankCode: intent.bank.code,
-    bankName: intent.bank.name,
-    bankAccountNumber: intent.bank.accountNumber,
-    bankAccountName: intent.bank.accountName,
-    qrPayload: intent.qrPayload,
-    expiresAt,
-  });
+  const payment = await paymentRepository.create(
+    {
+      orderId: order._id,
+      provider: provider.name,
+      intentId: intent.intentId,
+      // One payment per order: a refreshed checkout can never spawn a second one.
+      idempotencyKey: `checkout_${order._id}`,
+      amount: order.total,
+      currency: order.currency,
+      status: intent.status,
+      method: intent.method,
+      paymentCode,
+      bankBin: intent.bank.bin,
+      bankCode: intent.bank.code,
+      bankName: intent.bank.name,
+      bankAccountNumber: intent.bank.accountNumber,
+      bankAccountName: intent.bank.accountName,
+      qrPayload: intent.qrPayload,
+      expiresAt,
+    },
+    session
+  );
 
   logger.info(
     { orderNumber: order.orderNumber, paymentCode, amount: order.total, expiresAt },
     "payment created (awaiting bank transfer)"
   );
 
-  return { payment: payment.toObject() as PaymentRecord, qrCodeDataUrl: intent.qrCodeDataUrl };
+  return payment.toObject() as PaymentRecord;
+}
+
+/**
+ * Creates a payment and renders its QR in one step, for callers that are not
+ * already inside a transaction.
+ */
+export async function createPaymentForOrder(order: PayableOrder) {
+  const payment = await buildPaymentForOrder(order);
+  return { payment, qrCodeDataUrl: await renderQrCodeDataUrl(payment.qrPayload) };
 }
 
 /**
@@ -145,26 +162,32 @@ function isTerminal(payment: PaymentRecord): boolean {
  * both release steps are guarded by atomic claims.
  */
 export async function expirePayment(payment: PaymentRecord, reason = "Hết thời gian chờ thanh toán") {
-  const closed = await paymentRepository.markClosed(String(payment._id), "expired", reason);
-  if (!closed) {
-    // Someone else finalised it first (paid, or already expired) — nothing to do.
-    return null;
-  }
+  return withTransaction(async (session) => {
+    const closed = await paymentRepository.markClosed(String(payment._id), "expired", reason, session);
+    if (!closed) {
+      // Someone else finalised it first (paid, or already expired) — nothing to do.
+      return null;
+    }
 
-  const order = await orderRepository.findById(String(payment.orderId));
-  if (!order) {
-    logger.error({ paymentId: String(payment._id) }, "payment expired but order no longer exists");
+    const order = await orderRepository.findById(String(payment.orderId), session);
+    if (!order) {
+      logger.error({ paymentId: String(payment._id) }, "payment expired but order no longer exists");
+      return closed;
+    }
+
+    await orderRepository.updateById(
+      String(order._id),
+      { paymentStatus: "failed", orderStatus: "cancelled" },
+      session
+    );
+    await releaseOrderReservations(order, session);
+
+    logger.info(
+      { orderNumber: order.orderNumber, paymentCode: payment.paymentCode },
+      "payment expired - order cancelled, inventory and coupon released"
+    );
     return closed;
-  }
-
-  await orderRepository.updateById(String(order._id), { paymentStatus: "failed", orderStatus: "cancelled" });
-  await releaseOrderReservations(order);
-
-  logger.info(
-    { orderNumber: order.orderNumber, paymentCode: payment.paymentCode },
-    "payment expired - order cancelled, inventory and coupon released"
-  );
-  return closed;
+  });
 }
 
 /** Expires every timed-out payment. Driven by the background sweep job. */
@@ -183,37 +206,55 @@ export async function expireOverduePayments(now = new Date()) {
  * webhook, only after every reconciliation check passed.
  */
 async function settlePayment(payment: PaymentRecord, order: OrderRecord, event: BankTransactionEvent) {
-  const succeeded = await paymentRepository.markSucceeded(String(payment._id), {
-    transactionId: event.transactionId,
-    referenceCode: event.referenceCode,
-    transactionDate: event.transactionDate,
-    transferredAmount: event.transferAmount,
-    rawEvent: event.raw,
+  // Marking the payment paid and confirming its order must be one indivisible
+  // step: an order left `pending` behind a `succeeded` payment looks unpaid to
+  // both the customer and the shop, even though the money arrived.
+  const settled = await withTransaction(async (session) => {
+    const succeeded = await paymentRepository.markSucceeded(
+      String(payment._id),
+      {
+        transactionId: event.transactionId,
+        referenceCode: event.referenceCode,
+        transactionDate: event.transactionDate,
+        transferredAmount: event.transferAmount,
+        rawEvent: event.raw,
+      },
+      session
+    );
+
+    if (!succeeded) {
+      // Lost the race against a concurrent delivery of the same transfer.
+      logger.info({ paymentCode: payment.paymentCode }, "payment already processed");
+      return null;
+    }
+
+    // Stock was already reserved at checkout — confirming must never decrement again.
+    await orderRepository.updateById(
+      String(order._id),
+      {
+        paymentStatus: "paid",
+        orderStatus: order.orderStatus === "pending" ? "confirmed" : order.orderStatus,
+      },
+      session
+    );
+
+    return succeeded as PaymentRecord;
   });
 
-  if (!succeeded) {
-    // Lost the race against a concurrent delivery of the same transfer.
-    logger.info({ paymentCode: payment.paymentCode }, "payment already processed");
-    return null;
-  }
+  if (!settled) return null;
 
   logger.info(
     { paymentCode: payment.paymentCode, transactionId: event.transactionId, amount: event.transferAmount },
     "payment marked paid"
   );
-
-  // Stock was already reserved at checkout — confirming must never decrement again.
-  await orderRepository.updateById(String(order._id), {
-    paymentStatus: "paid",
-    orderStatus: order.orderStatus === "pending" ? "confirmed" : order.orderStatus,
-  });
   logger.info({ orderNumber: order.orderNumber }, "order confirmed");
 
-  // Both emails are attempted; neither can fail the other, and neither can fail
-  // the payment.
-  await deliverConfirmationEmail(succeeded as PaymentRecord, order);
-  await deliverOwnerNotification(succeeded as PaymentRecord, order);
-  return succeeded as PaymentRecord;
+  // Sent only after the commit: email is an unrollbackable side effect, and a
+  // retried transaction would send it twice. Both are attempted; neither can
+  // fail the other, and neither can fail the payment.
+  await deliverConfirmationEmail(settled, order);
+  await deliverOwnerNotification(settled, order);
+  return settled;
 }
 
 /** How each kind of payment email is addressed, sent and logged. */
@@ -338,7 +379,7 @@ export async function handleBankWebhook(rawBody: Buffer, headers: Record<string,
 
   // Recorded before any matching: the unique (provider, transactionId) index is
   // what makes a replayed delivery a no-op, even for transfers we cannot match.
-  const recorded = await bankTransactionRepository.insertIfNew({
+  const inserted = await bankTransactionRepository.insertIfNew({
     provider: provider.name,
     providerTransactionId: event.transactionId,
     gateway: event.gateway,
@@ -356,14 +397,31 @@ export async function handleBankWebhook(rawBody: Buffer, headers: Record<string,
     rawPayload: event.raw,
   });
 
-  if (!recorded) {
+  if (!inserted) {
+    logger.error({ transactionId: event.transactionId }, "could not record incoming transfer");
+    throw ApiError.internal("Không ghi nhận được giao dịch, vui lòng thử lại");
+  }
+
+  // A redelivery of a transfer that was already applied is genuinely nothing to
+  // do. One that was recorded but never settled is different: the first attempt
+  // may have died between the insert and the settlement, and swallowing the
+  // provider's retry would lose a real payment. Reconciliation is idempotent
+  // (every state change is an atomic guarded claim), so re-running it is safe.
+  if (!inserted.isNew && inserted.record.matchStatus === "matched") {
     logger.info({ transactionId: event.transactionId }, "payment already processed (duplicate webhook ignored)");
     return { processed: false, duplicate: true, status: "duplicate" as const };
   }
 
+  if (!inserted.isNew) {
+    logger.warn(
+      { transactionId: event.transactionId, previousStatus: inserted.record.matchStatus },
+      "re-reconciling a transfer that was recorded but never settled"
+    );
+  }
+
   const outcome = await reconcileTransaction(event);
 
-  await bankTransactionRepository.updateById(String(recorded._id), {
+  await bankTransactionRepository.updateById(String(inserted.record._id), {
     matchStatus: outcome.matchStatus,
     matchNote: outcome.note,
     ...(outcome.paymentId ? { paymentId: outcome.paymentId } : {}),
@@ -372,7 +430,7 @@ export async function handleBankWebhook(rawBody: Buffer, headers: Record<string,
 
   return {
     processed: outcome.matchStatus === "matched",
-    duplicate: false,
+    duplicate: !inserted.isNew,
     status: outcome.matchStatus,
   };
 }

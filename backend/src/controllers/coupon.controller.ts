@@ -7,7 +7,9 @@ import { ApiError } from "@/utils/ApiError";
 
 export const validateCoupon = asyncHandler(async (req: Request, res: Response) => {
   const { code, subtotal } = req.body;
-  const evaluation = await evaluateCoupon(code, subtotal);
+  // `couponId` is internal bookkeeping for checkout's atomic claim — the
+  // storefront preview has no use for it, so it is not exposed.
+  const { couponId: _couponId, ...evaluation } = await evaluateCoupon(code, subtotal);
   sendSuccess(res, evaluation);
 });
 

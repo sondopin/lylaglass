@@ -5,6 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
 import { adminApi } from "@/lib/api/admin";
@@ -113,7 +114,13 @@ export function ProductForm({ product }: { product?: Product }) {
   const token = useAdminAuthStore((s) => s.token);
   const queryClient = useQueryClient();
 
-  const { data: categories = [] } = useQuery({
+  const {
+    data: categories = [],
+    isLoading: isLoadingCategories,
+    isError: categoriesFailed,
+    error: categoriesError,
+    refetch: refetchCategories,
+  } = useQuery({
     queryKey: ["admin", "categories"],
     queryFn: () => adminApi.categories.list(token!),
     enabled: !!token,
@@ -198,8 +205,25 @@ export function ProductForm({ product }: { product?: Product }) {
               <FormItem>
                 <FormLabel>Danh mục</FormLabel>
                 <FormControl>
-                  <select {...field} className="w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-ring">
-                    <option value="">-- Chọn danh mục --</option>
+                  <select
+                    {...field}
+                    disabled={isLoadingCategories || categoriesFailed}
+                    className="w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-ring disabled:opacity-60"
+                  >
+                    {/*
+                      The placeholder states why the list is empty instead of
+                      silently offering nothing to choose — an empty dropdown
+                      with no explanation is indistinguishable from a bug.
+                    */}
+                    <option value="">
+                      {isLoadingCategories
+                        ? "Đang tải danh mục..."
+                        : categoriesFailed
+                          ? "Không tải được danh mục"
+                          : categories.length === 0
+                            ? "Chưa có danh mục nào"
+                            : "-- Chọn danh mục --"}
+                    </option>
                     {categories.map((c) => (
                       <option key={c._id} value={c._id}>
                         {c.name}
@@ -207,6 +231,32 @@ export function ProductForm({ product }: { product?: Product }) {
                     ))}
                   </select>
                 </FormControl>
+
+                {categoriesFailed && (
+                  <p className="text-xs text-destructive">
+                    {categoriesError instanceof ApiClientError
+                      ? categoriesError.message
+                      : "Không gọi được API. Kiểm tra backend đã chạy chưa."}{" "}
+                    <button
+                      type="button"
+                      onClick={() => refetchCategories()}
+                      className="underline underline-offset-2"
+                    >
+                      Thử lại
+                    </button>
+                  </p>
+                )}
+
+                {!isLoadingCategories && !categoriesFailed && categories.length === 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Cần tạo danh mục trước khi thêm sản phẩm —{" "}
+                    <Link href="/quan-tri/danh-muc" className="underline underline-offset-2">
+                      đi tới trang Danh mục
+                    </Link>
+                    .
+                  </p>
+                )}
+
                 <FormMessage />
               </FormItem>
             )}

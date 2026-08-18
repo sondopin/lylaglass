@@ -28,19 +28,35 @@ Backend theo mô hình **Controller → Service → Repository**:
     ngân hàng (`SePayBankNotificationProvider`). **Đây là nơi duy nhất có thể
     đánh dấu một payment là đã thanh toán.**
   Đổi nhà cung cấp chỉ cần thêm 1 class mới, không đụng vào Order system.
-- `email/` là abstraction gửi email (`ResendEmailProvider`, `LogEmailProvider`
-  cho dev), dùng bởi `services/email.service.ts`.
+- `email/` là abstraction gửi email (`GmailEmailProvider` dùng Gmail API,
+  `LogEmailProvider` cho dev), dùng bởi `services/email.service.ts`.
+  `email/mime.ts` dựng message RFC 2822: mã hoá tiêu đề tiếng Việt theo
+  RFC 2047 và từ chối mọi giá trị header có xuống dòng (chặn header injection).
 - `jobs/` chứa job định kỳ hết hạn payment và gửi lại email thất bại.
 
 ## Bắt đầu nhanh
 
-### 1. MongoDB
+### 1. MongoDB — bắt buộc replica set
+
+Checkout và xác nhận thanh toán chạy trong **transaction**, nên MongoDB phải là
+replica set (standalone `mongod` không hỗ trợ transaction).
 
 ```bash
-docker compose up -d mongo
+docker compose up -d mongo   # single-node replica set rs0, healthcheck tự rs.initiate()
 ```
 
-Hoặc trỏ `MONGODB_URI` trong `backend/.env` tới một MongoDB Atlas cluster.
+```
+# Local (từ máy host bắt buộc directConnection: replica set khai báo member là
+# `mongo:27017`, chỉ phân giải được bên trong mạng Docker)
+MONGODB_URI=mongodb://localhost:27017/lylaglass?replicaSet=rs0&directConnection=true
+
+# Production — MongoDB Atlas M0 (free tier, luôn là replica set 3 node nên có
+# sẵn transaction + backup tự động)
+MONGODB_URI=mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/lylaglass?retryWrites=true&w=majority
+```
+
+Nếu MongoDB không hỗ trợ transaction: production **từ chối khởi động**
+(`MONGODB_REQUIRE_TRANSACTIONS=true`), dev chỉ cảnh báo và rơi về đường bù trừ.
 
 ### 2. Backend
 
@@ -74,6 +90,23 @@ npm run dev               # http://localhost:3000
 
 Truy cập `http://localhost:3000/quan-tri/dang-nhap` với thông tin đã đặt ở
 `ADMIN_SEED_EMAIL` / `ADMIN_SEED_PASSWORD` trong `backend/.env`.
+
+**Nếu báo "Email hoặc mật khẩu không đúng"**: `npm run seed` chỉ tạo admin khi
+chưa có, và **không bao giờ ghi đè mật khẩu của tài khoản đã tồn tại** (để việc
+seed lại dữ liệu mẫu không vô hiệu hoá credential đang dùng). Nên nếu bạn đổi
+`ADMIN_SEED_PASSWORD` sau lần seed đầu tiên, mật khẩu trong DB vẫn là cái cũ.
+
+```bash
+cd backend
+npm run admin              # kiểm tra: tài khoản có tồn tại không, mật khẩu
+                           # trong .env có khớp hash trong DB không (không đổi gì)
+npm run admin -- --reset   # tạo admin, hoặc đặt lại mật khẩu theo ADMIN_SEED_PASSWORD
+```
+
+Có thể ghi đè bằng `--email=<địa chỉ>` và `--password=<mật khẩu>`. Script không
+bao giờ in mật khẩu ra log. `--reset` cũng bật lại `isActive` — một tài khoản bị
+vô hiệu hoá sẽ trượt đăng nhập trước cả khi mật khẩu được kiểm tra, nên nếu
+không bật lại thì "đặt lại mật khẩu" trông như không có tác dụng.
 
 ## Thanh toán: VietQR → TPBank → webhook
 
@@ -123,7 +156,7 @@ Order = `failed`/`cancelled`, tồn kho **và** lượt dùng coupon được ho
    kiểu xác thực **HMAC-SHA256** (khuyến nghị) hoặc **API Key**.
 4. **Điền `.env`** (xem `backend/.env.example`): `VIETQR_ACCOUNT_NUMBER`,
    `VIETQR_ACCOUNT_NAME`, `BANK_WEBHOOK_SECRET` (hoặc `BANK_WEBHOOK_API_KEY`),
-   `EMAIL_PROVIDER`/`EMAIL_API_KEY`/`EMAIL_FROM`, và
+   `EMAIL_PROVIDER=gmail` + 4 biến `GMAIL_*` (xem mục Email bên dưới), và
    `ORDER_NOTIFICATION_EMAILS` nếu muốn shop nhận email mỗi khi có đơn đã
    thanh toán (để trống là tắt tính năng này).
 5. **Migration** (chỉ cần nếu DB đã có dữ liệu từ scheme COD/mock cũ):
@@ -156,14 +189,87 @@ curl -X POST http://localhost:4000/api/payments/bank-webhook \
 
 ## Kiểm tra đã thực hiện
 
-- `npm test` (backend, Vitest): 50 test bao gồm sinh VietQR (đối chiếu với
-  vector tham chiếu NAPAS), xác thực webhook SePay (HMAC/API key/replay), và
-  toàn bộ quy tắc đối soát — sai số tiền, sai nội dung, sai tài khoản, webhook
-  trùng, hết hạn, hoàn kho/coupon, email gửi đúng một lần.
-- Race-condition tồn kho: giảm kho bằng `findOneAndUpdate` atomic theo từng
-  SKU; hoàn kho/coupon qua atomic claim nên không bao giờ chạy hai lần.
+- `npm test` (backend, Vitest): **104 test**.
+  - Unit (repository được stub, không cần DB): sinh VietQR đối chiếu vector
+    tham chiếu NAPAS, xác thực webhook SePay (HMAC/API key/replay), toàn bộ
+    quy tắc đối soát (sai số tiền, sai nội dung, sai tài khoản, webhook trùng,
+    hết hạn, hoàn kho/coupon, email gửi đúng một lần), dựng MIME + mã hoá
+    tiếng Việt + chặn header injection, cache access token của Gmail.
+  - Integration (`tests/integration/`, chạy trên replica set thật, tự bỏ qua
+    nếu không kết nối được): xác nhận transaction thật sự hoạt động và
+    **kiểm chứng bằng chạy song song**:
+    - 8 khách mua đồng thời, kho còn 3 → đúng 3 đơn thành công, kho về 0,
+      không có Order/Payment mồ côi.
+    - 6 khách dùng đồng thời coupon `usageLimit: 2` → đúng 2 đơn thành công,
+      `usageCount` bằng đúng 2, 4 đơn thất bại không tiêu kho.
+    - Checkout lỗi giữa chừng → không để lại gì: 0 Order, 0 Payment, kho
+      nguyên vẹn.
+- Race-condition tồn kho: trừ kho bằng `findOneAndUpdate` atomic theo từng SKU
+  (điều kiện `inventoryQty >= quantity` nằm trong filter), toàn bộ nằm trong
+  transaction; hoàn kho/coupon qua atomic claim nên không bao giờ chạy hai lần.
+- Lượt dùng coupon được claim atomic (`claimUsage` kiểm tra lại `usageLimit`
+  và khoảng thời gian hiệu lực ngay trong filter của update), nên không thể
+  vượt hạn mức khi nhiều khách đặt cùng lúc.
 - `npm run build` ở cả hai thư mục chạy sạch (frontend prerender 28 routes,
   backend biên dịch TypeScript không lỗi).
+
+## Email (Gmail API)
+
+Mỗi đơn thanh toán thành công gửi **hai** email, mỗi loại đúng một lần:
+
+| Email | Người nhận | Nội dung |
+|---|---|---|
+| Xác nhận thanh toán | email khách nhập lúc checkout | mã đơn, số tiền, sản phẩm, địa chỉ giao, link tra cứu đơn |
+| Thông báo đơn mới | `ORDER_NOTIFICATION_EMAILS` (có thể nhiều người, cách nhau bằng phẩy) | cần đóng gói gì, giao đến đâu, ghi chú của khách, thông tin đối soát, link mở đơn trong trang quản trị |
+
+Hai email được theo dõi độc lập trên Payment (`confirmationEmail*` và
+`ownerNotification*`) nên một cái lỗi không chặn hoặc gửi lại cái kia, và
+không cái nào có thể làm hỏng trạng thái đã thanh toán của đơn.
+
+### Lấy refresh token (làm một lần)
+
+1. [Google Cloud Console](https://console.cloud.google.com) → tạo project →
+   bật **Gmail API**.
+2. **OAuth consent screen**: chọn External, thêm địa chỉ `GMAIL_SENDER` vào
+   danh sách *Test users*.
+3. **Credentials** → *Create OAuth client ID* → loại **Desktop app**. Lưu lại
+   Client ID và Client secret.
+4. Mở URL sau trên trình duyệt (thay `<GMAIL_CLIENT_ID>`), bấm đồng ý, rồi
+   copy tham số `code` trên thanh địa chỉ sau khi bị chuyển hướng:
+
+   ```
+   https://accounts.google.com/o/oauth2/v2/auth?client_id=<GMAIL_CLIENT_ID>&redirect_uri=http://localhost&response_type=code&scope=https://www.googleapis.com/auth/gmail.send&access_type=offline&prompt=consent
+   ```
+
+5. Đổi `code` lấy refresh token:
+
+   ```bash
+   curl -s https://oauth2.googleapis.com/token \
+     -d client_id=<GMAIL_CLIENT_ID> -d client_secret=<GMAIL_CLIENT_SECRET> \
+     -d code=<CODE> -d grant_type=authorization_code -d redirect_uri=http://localhost
+   ```
+
+6. Điền vào `backend/.env`:
+
+   ```
+   EMAIL_PROVIDER=gmail
+   GMAIL_CLIENT_ID=...
+   GMAIL_CLIENT_SECRET=...
+   GMAIL_REFRESH_TOKEN=...
+   GMAIL_SENDER=shop@lylaglass.vn
+   EMAIL_FROM=LylaGlass <shop@lylaglass.vn>
+   ORDER_NOTIFICATION_EMAILS=owner@lylaglass.vn
+   ```
+
+`EMAIL_FROM` phải là chính `GMAIL_SENDER` hoặc một alias đã xác minh trong mục
+"Send mail as" của Gmail — nếu không Gmail sẽ từ chối.
+
+Quyền được cấp chỉ là `gmail.send` (**không** đọc được hộp thư) và có thể thu
+hồi bất cứ lúc nào trong phần bảo mật của tài khoản Google. Không có mật khẩu
+nào được lưu.
+
+Hạn ngạch gửi: ~500 người nhận/ngày với tài khoản @gmail.com, ~2000/ngày với
+Google Workspace.
 
 ## Giới hạn đã biết / việc còn lại
 

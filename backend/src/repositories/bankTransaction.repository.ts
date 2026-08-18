@@ -11,16 +11,31 @@ export interface BankTransactionListFilters {
 
 export const bankTransactionRepository = {
   /**
-   * Records an incoming transfer. Returns `null` when the provider has already
-   * delivered this transaction id — the unique index, not a read-then-write
-   * check, is what makes duplicate delivery impossible under concurrency.
+   * Records an incoming transfer, or reports that it was already recorded.
+   *
+   * The unique `(provider, providerTransactionId)` index — not a read-then-write
+   * check — is what makes duplicate delivery impossible under concurrency: two
+   * simultaneous deliveries of the same transfer both attempt the insert and
+   * exactly one wins.
+   *
+   * On a duplicate the *existing* record is returned rather than a bare `null`,
+   * so the caller can tell apart the two very different cases behind it:
+   *  - already reconciled  → genuinely nothing to do
+   *  - recorded but never reconciled (the process died mid-webhook, or the
+   *    reconciliation threw) → the provider's retry must be allowed to finish
+   *    the job instead of being swallowed, otherwise a real payment is lost.
    */
-  async insertIfNew(data: Record<string, unknown>) {
+  async insertIfNew(data: Record<string, unknown>): Promise<{ record: BankTransaction; isNew: boolean } | null> {
     try {
-      return await BankTransactionModel.create(data);
+      const created = await BankTransactionModel.create(data);
+      return { record: created.toObject() as BankTransaction, isNew: true };
     } catch (err) {
       if (err && typeof err === "object" && "code" in err && (err as { code: number }).code === DUPLICATE_KEY) {
-        return null;
+        const existing = (await BankTransactionModel.findOne({
+          provider: data.provider,
+          providerTransactionId: data.providerTransactionId,
+        }).lean()) as BankTransaction | null;
+        return existing ? { record: existing, isNew: false } : null;
       }
       throw err;
     }

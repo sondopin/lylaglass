@@ -1,4 +1,4 @@
-import { FilterQuery } from "mongoose";
+import { ClientSession, FilterQuery } from "mongoose";
 import { OrderModel, Order } from "@/models/Order.model";
 
 export interface OrderListFilters {
@@ -11,11 +11,20 @@ export interface OrderListFilters {
 }
 
 export const orderRepository = {
-  create: (data: Record<string, unknown>) => OrderModel.create(data),
-  findByOrderNumber: (orderNumber: string) => OrderModel.findOne({ orderNumber }).lean(),
-  findById: (id: string) => OrderModel.findById(id).lean(),
-  updateById: (id: string, data: Record<string, unknown>) =>
-    OrderModel.findByIdAndUpdate(id, data, { new: true, runValidators: true }).lean(),
+  /**
+   * Mongoose only honours a session on `create` when the documents are passed
+   * as an array, so the single-document call is normalised here rather than at
+   * every call site.
+   */
+  async create(data: Record<string, unknown>, session?: ClientSession) {
+    const [order] = await OrderModel.create([data], session ? { session } : {});
+    return order;
+  },
+  findByOrderNumber: (orderNumber: string, session?: ClientSession) =>
+    OrderModel.findOne({ orderNumber }).session(session ?? null).lean(),
+  findById: (id: string, session?: ClientSession) => OrderModel.findById(id).session(session ?? null).lean(),
+  updateById: (id: string, data: Record<string, unknown>, session?: ClientSession) =>
+    OrderModel.findByIdAndUpdate(id, data, { new: true, runValidators: true, session }).lean(),
   updateByOrderNumber: (orderNumber: string, data: Record<string, unknown>) =>
     OrderModel.findOneAndUpdate({ orderNumber }, data, { new: true, runValidators: true }).lean(),
 
@@ -23,16 +32,24 @@ export const orderRepository = {
    * Claims the right to return this order's reserved stock. Only the first
    * caller gets the document back, so a retried webhook, the expiry job and an
    * admin cancellation racing each other can never restock twice.
+   *
+   * This guard is kept even when the caller runs in a transaction: it is what
+   * protects the degraded (standalone) mode, and inside a transaction it costs
+   * nothing.
    */
-  claimInventoryRelease: (id: string) =>
-    OrderModel.findOneAndUpdate({ _id: id, inventoryReleased: false }, { inventoryReleased: true }, { new: true }).lean(),
+  claimInventoryRelease: (id: string, session?: ClientSession) =>
+    OrderModel.findOneAndUpdate(
+      { _id: id, inventoryReleased: false },
+      { inventoryReleased: true },
+      { new: true, session }
+    ).lean(),
 
   /** Same one-shot guard for giving back the coupon use counted at checkout. */
-  claimCouponUsageRelease: (id: string) =>
+  claimCouponUsageRelease: (id: string, session?: ClientSession) =>
     OrderModel.findOneAndUpdate(
       { _id: id, couponUsageReleased: false, couponCode: { $ne: "" } },
       { couponUsageReleased: true },
-      { new: true }
+      { new: true, session }
     ).lean(),
 
   async list(filters: OrderListFilters) {

@@ -1,6 +1,6 @@
 import "dotenv/config";
 import bcrypt from "bcryptjs";
-import { connectDatabase, disconnectDatabase } from "@/config/db";
+import { connectDatabase, disconnectDatabase, ensureCriticalIndexes } from "@/config/db";
 import { env } from "@/config/env";
 import { logger } from "@/config/logger";
 import { CategoryModel } from "@/models/Category.model";
@@ -9,17 +9,34 @@ import { AdminUserModel } from "@/models/AdminUser.model";
 import { CouponModel } from "@/models/Coupon.model";
 import { ReviewModel } from "@/models/Review.model";
 import { SettingsModel } from "@/models/Settings.model";
+import { BankTransactionModel } from "@/models/BankTransaction.model";
+import { CustomerModel } from "@/models/Customer.model";
+import { OrderModel } from "@/models/Order.model";
+import { PaymentModel } from "@/models/Payment.model";
+import { seedDemoOrders } from "./demoOrders";
 import { IMAGES } from "./images";
 
 async function seed() {
   await connectDatabase();
+  // `autoIndex` is off, so a freshly seeded database would otherwise have no
+  // unique indexes at all — including the ones enforcing payment idempotency.
+  await ensureCriticalIndexes();
   logger.info("Bắt đầu seed dữ liệu LylaGlass...");
+
+  // Orders/payments reference products by id, so leaving them behind while the
+  // catalogue is recreated would produce orders pointing at deleted products.
+  // Wiping them together keeps the seeded database internally consistent.
+  logger.warn("Seed sẽ XOÁ toàn bộ catalogue, đơn hàng, payment, giao dịch NH và khách hàng, rồi tạo lại dữ liệu mẫu.");
 
   await Promise.all([
     CategoryModel.deleteMany({}),
     ProductModel.deleteMany({}),
     CouponModel.deleteMany({}),
     ReviewModel.deleteMany({}),
+    OrderModel.deleteMany({}),
+    PaymentModel.deleteMany({}),
+    BankTransactionModel.deleteMany({}),
+    CustomerModel.deleteMany({}),
   ]);
 
   // ---- Settings -------------------------------------------------------
@@ -37,6 +54,11 @@ async function seed() {
   );
 
   // ---- Admin user -------------------------------------------------------
+  // Seeding never overwrites an existing admin's password: re-seeding demo
+  // catalogue data must not silently invalidate a credential someone is using.
+  // The consequence is that editing ADMIN_SEED_PASSWORD after the first seed
+  // has no effect here, which is indistinguishable from a wrong password at the
+  // login screen — so say so explicitly rather than passing over it in silence.
   const existingAdmin = await AdminUserModel.findOne({ email: env.adminSeedEmail });
   if (!existingAdmin) {
     const passwordHash = await bcrypt.hash(env.adminSeedPassword, 10);
@@ -47,6 +69,11 @@ async function seed() {
       role: "owner",
     });
     logger.info(`Đã tạo tài khoản admin: ${env.adminSeedEmail}`);
+  } else {
+    logger.info(
+      `Tài khoản admin ${env.adminSeedEmail} đã tồn tại — GIỮ NGUYÊN mật khẩu cũ. ` +
+        `Nếu vừa đổi ADMIN_SEED_PASSWORD, chạy: npm run admin -- --reset`
+    );
   }
 
   // ---- Categories ---------------------------------------------------
@@ -366,10 +393,59 @@ async function seed() {
       isNewArrival: true,
       isBestseller: true,
     },
+    // --- Trạng thái không phải "active", để test bộ lọc ở trang quản trị ---
+    // A draft must never appear on the storefront but must appear in the admin
+    // list; without one, a broken status filter looks identical to a working one.
+    {
+      name: "Set Ly Quà Tặng Doanh Nghiệp In Logo (Sắp Ra Mắt)",
+      slug: "set-ly-qua-tang-doanh-nghiep-in-logo",
+      categoryId: gifting._id,
+      shortDescription: "Set ly in logo theo đơn đặt riêng cho doanh nghiệp — đang hoàn thiện, chưa mở bán.",
+      description: "Bản nháp phục vụ thử nghiệm: sản phẩm ở trạng thái draft sẽ không hiển thị ngoài storefront.",
+      images: [{ url: IMAGES.gifting[0], alt: "Set ly quà tặng doanh nghiệp in logo" }],
+      optionName: "Số lượng",
+      variants: [{ sku: "DN-SET10", name: "Set 10 ly", price: 1990000, inventoryQty: 10 }],
+      tags: ["qua-tang", "ca-nhan-hoa"],
+      material: "Thủy tinh cao cấp",
+      status: "draft",
+    },
+    {
+      name: "Ly Thủy Tinh Cổ Điển Bản Giới Hạn 2025 (Ngừng Kinh Doanh)",
+      slug: "ly-co-dien-gioi-han-2025",
+      categoryId: seasonal._id,
+      shortDescription: "Bản giới hạn năm 2025 đã ngừng kinh doanh, giữ lại để tra cứu đơn hàng cũ.",
+      description: "Bản archived phục vụ thử nghiệm: không hiển thị ngoài storefront, không đặt hàng được.",
+      images: [{ url: IMAGES.seasonal[0], alt: "Ly thủy tinh cổ điển bản giới hạn" }],
+      optionName: "Dung tích",
+      variants: [{ sku: "GH-2025", name: "350ml", price: 259000, inventoryQty: 0 }],
+      tags: ["theo-mua", "gioi-han"],
+      material: "Thủy tinh cao cấp",
+      status: "archived",
+    },
   ];
 
   const createdProducts = await ProductModel.insertMany(products);
-  logger.info(`Đã tạo ${createdProducts.length} sản phẩm`);
+  logger.info(`Đã tạo ${createdProducts.length} sản phẩm (gồm 1 draft, 1 archived)`);
+
+  // ---- Trạng thái tồn kho biên -------------------------------------------
+  // Everything seeded above is comfortably in stock, which leaves the sold-out
+  // and low-stock paths (PDP "Hết hàng", checkout 409, dashboard cảnh báo sắp
+  // hết) with no data to exercise them.
+  // Matched by SKU rather than slug: the SKU is the stable identifier a variant
+  // is addressed by everywhere else in the system.
+  const stockOverrides: Array<[sku: string, qty: number]> = [
+    ["RV-2LY", 0], // hết hàng
+    ["TT-2LY", 3], // sắp hết
+  ];
+  for (const [sku, inventoryQty] of stockOverrides) {
+    const result = await ProductModel.updateOne(
+      { "variants.sku": sku },
+      { $set: { "variants.$[v].inventoryQty": inventoryQty } },
+      { arrayFilters: [{ "v.sku": sku }] }
+    );
+    if (result.matchedCount === 0) throw new Error(`Seed: không tìm thấy SKU ${sku} để đặt tồn kho`);
+  }
+  logger.info("Đã đặt 1 variant hết hàng (RV-2LY = 0) và 1 variant sắp hết (TT-2LY = 3)");
 
   // ---- Sample reviews for a few bestsellers ----------------------------
   const bestsellers = createdProducts.filter((p) => p.isBestseller).slice(0, 3);
@@ -390,10 +466,28 @@ async function seed() {
   }
 
   // ---- Coupons ----------------------------------------------------------
+  // One coupon per rejection reason in evaluateCoupon/claimUsage, so every
+  // branch of the discount logic can be exercised from the storefront.
+  const now = Date.now();
   await CouponModel.insertMany([
-    { code: "LYLA10", type: "percentage", value: 10, minimumSubtotal: 200000, isActive: true },
-    { code: "FREESHIP", type: "free_shipping", value: 0, minimumSubtotal: 300000, isActive: true },
+    { code: "LYLA10", type: "percentage", value: 10, minimumSubtotal: 200_000, isActive: true },
+    { code: "FREESHIP", type: "free_shipping", value: 0, minimumSubtotal: 300_000, isActive: true },
+    // Percentage with a cap — discount stops growing past maxDiscountAmount.
+    { code: "SALE20", type: "percentage", value: 20, maxDiscountAmount: 100_000, minimumSubtotal: 300_000, isActive: true },
+    // Fixed amount, and a high minimum so "chưa đủ điều kiện" is reachable.
+    { code: "GIAM50K", type: "fixed", value: 50_000, minimumSubtotal: 400_000, isActive: true },
+    // One redemption left: two simultaneous checkouts must not both get it.
+    { code: "LASTCALL", type: "percentage", value: 15, usageLimit: 2, usageCount: 1, isActive: true },
+    // Already exhausted.
+    { code: "HETLUOT", type: "percentage", value: 25, usageLimit: 3, usageCount: 3, isActive: true },
+    { code: "HETHAN", type: "percentage", value: 30, endsAt: new Date(now - 2 * 24 * 60 * 60_000), isActive: true },
+    { code: "SAPMO", type: "percentage", value: 30, startsAt: new Date(now + 7 * 24 * 60 * 60_000), isActive: true },
+    { code: "TATDUNG", type: "percentage", value: 50, isActive: false },
   ]);
+  logger.info("Đã tạo 9 mã giảm giá (đủ mọi trạng thái: hợp lệ, hết lượt, hết hạn, chưa mở, tắt)");
+
+  // ---- Demo orders / payments / bank transactions ------------------------
+  await seedDemoOrders();
 
   logger.info("Seed hoàn tất!");
   await disconnectDatabase();

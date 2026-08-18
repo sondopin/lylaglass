@@ -26,7 +26,20 @@ export function validateRuntimeConfig() {
     problems.push("PAYMENT_TTL_MINUTES");
   }
 
-  if (env.email.provider === "resend" && !env.email.apiKey) problems.push("EMAIL_API_KEY");
+  if (env.email.provider === "gmail") {
+    if (!env.email.gmail.clientId) problems.push("GMAIL_CLIENT_ID");
+    if (!env.email.gmail.clientSecret) problems.push("GMAIL_CLIENT_SECRET");
+    if (!env.email.gmail.refreshToken) problems.push("GMAIL_REFRESH_TOKEN");
+    if (!env.email.gmail.sender) problems.push("GMAIL_SENDER");
+  }
+
+  // Not fatal — the shop alert is optional and the customer's confirmation is
+  // unaffected — but silently never alerting the owner is worth saying out loud.
+  if (env.email.orderNotificationRecipients.length === 0) {
+    logger.warn(
+      "ORDER_NOTIFICATION_EMAILS chưa được cấu hình — chủ shop sẽ KHÔNG nhận được email báo đơn mới đã thanh toán"
+    );
+  }
 
   if (problems.length === 0) return;
 

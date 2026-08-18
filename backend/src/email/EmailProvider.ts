@@ -8,7 +8,7 @@ export interface SendEmailInput {
 
 /**
  * Transactional email transport. Kept behind an interface for the same reason
- * payments are: swapping Resend for SES/Postmark/SMTP must not touch any
+ * payments are: swapping Gmail for SES/Postmark/SMTP must not touch any
  * business logic, only a registration in email/index.ts.
  */
 export interface EmailProvider {
