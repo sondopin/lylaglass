@@ -33,6 +33,16 @@ export function validateRuntimeConfig() {
     if (!env.email.gmail.sender) problems.push("GMAIL_SENDER");
   }
 
+  // Not fatal: the storefront runs fine on existing image URLs, only the admin's
+  // upload button stops working. Worth saying at boot rather than letting an
+  // admin discover it mid-edit.
+  if (!env.cloudinary.cloudName || !env.cloudinary.apiKey || !env.cloudinary.apiSecret) {
+    logger.warn(
+      "Chưa cấu hình CLOUDINARY_* — chức năng tải ảnh trong trang quản trị sẽ báo lỗi. " +
+        "Lưu ý: cấu hình được đọc lúc khởi động, nên sau khi điền key phải KHỞI ĐỘNG LẠI backend."
+    );
+  }
+
   // Not fatal — the shop alert is optional and the customer's confirmation is
   // unaffected — but silently never alerting the owner is worth saying out loud.
   if (env.email.orderNotificationRecipients.length === 0) {

@@ -271,9 +271,32 @@ nào được lưu.
 Hạn ngạch gửi: ~500 người nhận/ngày với tài khoản @gmail.com, ~2000/ngày với
 Google Workspace.
 
+## Upload ảnh sản phẩm (Cloudinary)
+
+Trong `Quản trị → Sản phẩm → Thêm/Sửa`, phần **Hình ảnh** cho phép kéo-thả hoặc
+chọn nhiều ảnh từ máy. Ảnh được tải thẳng lên Cloudinary, form nhận về URL và
+`publicId`. Ngoài ra vẫn dán được URL ngoài bằng nút "Dán URL".
+
+- Ảnh **đầu tiên** trong danh sách là ảnh đại diện (hiện ở trang danh sách, giỏ
+  hàng, email). Dùng nút mũi tên lên/xuống để đổi thứ tự.
+- Giới hạn **5MB**, định dạng **JPEG / PNG / WEBP / AVIF**. Kiểm tra ở cả ba nơi:
+  trình duyệt (báo lỗi ngay, không tốn băng thông), multer, và `allowed_formats`
+  của Cloudinary.
+- Chọn nhiều ảnh thì mỗi ảnh tải lên độc lập — một ảnh lỗi không làm mất những
+  ảnh đã lên thành công, và báo rõ tệp nào hỏng vì sao.
+- Alt text mặc định lấy từ tên tệp, sửa lại được tại chỗ.
+
+Cấu hình: `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`
+trong `backend/.env`.
+
+> **Cấu hình Cloudinary được đọc lúc khởi động.** Sau khi điền key phải **khởi
+> động lại backend**, nếu không upload sẽ lỗi dù key đã đúng. Thiếu key thì
+> backend log cảnh báo lúc boot (storefront vẫn chạy bình thường, chỉ nút tải
+> ảnh là hỏng).
+
 ## Giới hạn đã biết / việc còn lại
 
-- Ảnh sản phẩm dùng Unsplash (đã kiểm tra URL còn hoạt động) làm placeholder
+- Ảnh sản phẩm **seed** dùng Unsplash (đã kiểm tra URL còn hoạt động) làm placeholder
   — cần thay bằng ảnh chụp sản phẩm thật trước khi lên production.
 - Chuyển khoản **thừa tiền** hoặc **đến sau khi payment hết hạn** không được
   tự động xác nhận (tránh oversell sau khi đã hoàn kho): giao dịch được ghi

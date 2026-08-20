@@ -13,6 +13,8 @@ export interface ProductImage {
   url: string;
   alt?: string;
   position?: number;
+  /** Cloudinary asset id — only set for images uploaded through the admin. */
+  publicId?: string;
 }
 
 export interface ProductVariant {

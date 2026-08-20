@@ -55,7 +55,7 @@ Phương thức thanh toán duy nhất là **chuyển khoản ngân hàng qua Vi
 | Auth | `jsonwebtoken` + `bcryptjs` | JWT HS256, chỉ cho admin |
 | Bảo mật | `helmet`, `cors`, `express-rate-limit` | Rate limit 300 req / 15 phút trên `/api` |
 | Logging | `pino` + `pino-http` | `pino-pretty` khi dev |
-| Upload ảnh | `multer` (memory) + Cloudinary SDK | Buffer → stream thẳng lên Cloudinary, không lưu đĩa |
+| Upload ảnh | `multer` (memory) + Cloudinary SDK | Buffer → stream thẳng lên Cloudinary, không lưu đĩa. Giới hạn 5MB, chỉ JPEG/PNG/WEBP/AVIF, kiểm tra 2 lớp (mime ở multer + `allowed_formats` ở Cloudinary) |
 | Sinh mã | `nanoid` | Order number + payment code (alphabet không có ký tự dễ nhầm) |
 | QR thanh toán | `qrcode` | Render VietQR thành PNG data URI ngay trong process (không gửi STK cho dịch vụ ảnh bên thứ ba) |
 | Email | **Gmail API** (OAuth2 refresh token) qua `fetch` | Không thêm SDK; tự dựng MIME đa phần + mã hoá RFC 2047 cho tiếng Việt; provider `log` ghi ra log khi dev |
@@ -337,7 +337,7 @@ Base: `http://localhost:4000/api` · 🔓 công khai · 🔐 cần admin JWT · 
 | GET/POST | `/products/:productId/reviews` | 🔓 | Đọc & viết đánh giá |
 | POST/PATCH/DELETE | `/products…` | 🔐 | CRUD sản phẩm |
 | PATCH | `/products/:id/inventory` | 🔐 | Set `inventoryQty` cho 1 SKU |
-| POST | `/products/upload-image` | 🔐 | multipart → Cloudinary |
+| POST | `/products/upload-image` | 🔐 | multipart (`image`) → Cloudinary. Trả `{ url, publicId, width, height, format, bytes }` |
 | **POST** | **`/checkout`** | 🔓 | **Tạo đơn + Payment + VietQR — trái tim hệ thống** |
 | **POST** | **`/payments/bank-webhook`** | 🔓* | **Thông báo tiền vào TPBank** (*xác thực bằng HMAC/API key của SePay, không phải JWT) |
 | **GET** | **`/orders/:orderNumber/payment-status?email=&includeQr=`** | 🔓 | **Trạng thái thanh toán realtime** (FE polling; `no-store`, limiter riêng) |
@@ -847,6 +847,8 @@ Storefront layout fetch categories + settings ngay lúc SSR → chạy frontend 
 6. **Không đối soát dòng tiền tự động** — `BankTransaction` là sổ ghi nhận, không phải hệ thống đối soát/sổ quỹ; không có model Payout/Settlement.
 7. **Không có manual override "đã thanh toán" cho admin** — theo thiết kế, để không ai vô tình bỏ qua đối soát. Nếu cần cho ca đặc biệt, phải làm thành chức năng riêng có audit log rõ ràng.
 8. **Review auto-publish** (`isApproved` mặc định `true`) và **không kiểm chứng đã mua hàng** — dễ bị spam.
-9. **Ảnh sản phẩm dùng Unsplash placeholder** — cần thay ảnh thật trước production.
+9. **Ảnh sản phẩm seed dùng Unsplash placeholder** — admin đã tải được ảnh thật lên Cloudinary (kéo-thả trong form sản phẩm), nhưng dữ liệu seed vẫn là ảnh mượn; cần thay trước production.
+
+13. **Ảnh trên Cloudinary không tự dọn** — `publicId` đã được lưu cùng mỗi ảnh nên việc xoá là *khả thi*, nhưng gỡ ảnh khỏi sản phẩm hay xoá sản phẩm hiện chỉ bỏ tham chiếu trong MongoDB, không gọi `deleteImageByPublicId`. Ảnh cũ tồn lại trong storage (free tier 25GB nên chưa gấp). Cần làm thành job dọn dẹp có đối chiếu, không nên xoá ngay lúc sửa form vì admin có thể huỷ thay đổi.
 10. **Form Liên hệ & Newsletter chỉ hiện toast**, không lưu backend.
 11. **Webhook cần HTTPS ở production** — chữ ký HMAC chống giả mạo nội dung nhưng không chống nghe lén; ngoài ra nên thêm IP allowlist của provider ở tầng reverse proxy nếu môi trường cho phép.

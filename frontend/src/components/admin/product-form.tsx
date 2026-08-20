@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef, useState } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -7,7 +8,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Image as ImageIcon, Loader2, Plus, Trash2, Upload } from "lucide-react";
 import { adminApi } from "@/lib/api/admin";
 import { useAdminAuthStore } from "@/store/admin-auth-store";
 import { Product } from "@/lib/api/types";
@@ -16,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { ApiClientError } from "@/lib/api/client";
+import { cn } from "@/lib/utils";
 
 const variantSchema = z.object({
   sku: z.string().min(1, "Bắt buộc"),
@@ -25,7 +27,129 @@ const variantSchema = z.object({
   inventoryQty: z.coerce.number().min(0),
 });
 
-const imageSchema = z.object({ url: z.string().url("URL không hợp lệ"), alt: z.string().optional() });
+const imageSchema = z.object({
+  url: z.string().url("URL không hợp lệ"),
+  alt: z.string().optional(),
+  /** Present only for images uploaded to Cloudinary through this form. */
+  publicId: z.string().optional(),
+});
+
+/** Kept in step with the multer limit in `backend/src/middlewares/upload.ts`. */
+const MAX_IMAGE_MB = 5;
+const MAX_IMAGE_BYTES = MAX_IMAGE_MB * 1024 * 1024;
+const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/avif"];
+
+/**
+ * Rejects what the server would reject anyway, but immediately and per-file.
+ * Uploading a 40MB file only to be told "too large" after the whole transfer is
+ * a poor trade when the size is knowable up front.
+ */
+function rejectionReason(file: File): string | null {
+  if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
+    return `"${file.name}": chỉ chấp nhận JPEG, PNG, WEBP hoặc AVIF`;
+  }
+  if (file.size > MAX_IMAGE_BYTES) {
+    return `"${file.name}": ${(file.size / 1024 / 1024).toFixed(1)}MB, vượt quá ${MAX_IMAGE_MB}MB`;
+  }
+  return null;
+}
+
+/** Preview of an image already attached to the product. */
+function ImageThumb({ url, isPrimary }: { url: string; isPrimary: boolean }) {
+  return (
+    <div className="relative size-20 shrink-0 overflow-hidden rounded-lg border border-border bg-muted">
+      {url ? (
+        // A plain <img>: the URL is whatever the admin pasted, and next/image
+        // would fail the whole render on a host missing from remotePatterns.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={url} alt="" className="size-full object-cover" />
+      ) : (
+        <div className="flex size-full items-center justify-center">
+          <ImageIcon className="size-5 text-muted-foreground" />
+        </div>
+      )}
+      {isPrimary && (
+        <span className="absolute inset-x-0 bottom-0 bg-foreground/80 py-0.5 text-center text-[10px] font-medium text-background">
+          Đại diện
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Click-to-browse and drag-and-drop target for uploading new images. */
+function ImageDropzone({
+  disabled,
+  pendingCount,
+  onFilesSelected,
+}: {
+  disabled: boolean;
+  pendingCount: number;
+  onFilesSelected: (files: File[]) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  function handleFiles(list: FileList | null) {
+    const files = Array.from(list ?? []);
+    if (files.length > 0) onFilesSelected(files);
+  }
+
+  return (
+    <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        if (!disabled) setIsDragging(true);
+      }}
+      onDragLeave={() => setIsDragging(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setIsDragging(false);
+        if (!disabled) handleFiles(e.dataTransfer.files);
+      }}
+      className={cn(
+        "flex flex-col items-center gap-2 rounded-xl border border-dashed border-border px-6 py-8 text-center transition",
+        isDragging && "border-foreground bg-muted/50",
+        disabled && "opacity-60"
+      )}
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        accept={ACCEPTED_IMAGE_TYPES.join(",")}
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          handleFiles(e.target.files);
+          // Reset so selecting the same file twice in a row still fires change.
+          e.target.value = "";
+        }}
+      />
+
+      {disabled ? (
+        <>
+          <Loader2 className="size-5 animate-spin text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">Đang tải {pendingCount} ảnh lên...</p>
+        </>
+      ) : (
+        <>
+          <Upload className="size-5 text-muted-foreground" />
+          <p className="text-sm">
+            Kéo thả ảnh vào đây, hoặc{" "}
+            <button
+              type="button"
+              onClick={() => inputRef.current?.click()}
+              className="font-medium underline underline-offset-2"
+            >
+              chọn từ máy
+            </button>
+          </p>
+          <p className="text-xs text-muted-foreground">Có thể chọn nhiều ảnh cùng lúc</p>
+        </>
+      )}
+    </div>
+  );
+}
 
 const productFormSchema = z.object({
   name: z.string().min(1, "Bắt buộc"),
@@ -98,7 +222,7 @@ function toFormValues(product?: Product): ProductFormValues {
     isNewArrival: !!product.isNewArrival,
     seoTitle: product.seoTitle ?? "",
     seoDescription: product.seoDescription ?? "",
-    images: product.images.map((i) => ({ url: i.url, alt: i.alt ?? "" })),
+    images: product.images.map((i) => ({ url: i.url, alt: i.alt ?? "", publicId: i.publicId ?? "" })),
     variants: product.variants.map((v) => ({
       sku: v.sku,
       name: v.name,
@@ -133,6 +257,65 @@ export function ProductForm({ product }: { product?: Product }) {
 
   const variantFields = useFieldArray({ control: form.control, name: "variants" });
   const imageFields = useFieldArray({ control: form.control, name: "images" });
+
+  const [pendingUploads, setPendingUploads] = useState(0);
+
+  /**
+   * Uploads the selected files to Cloudinary and appends each result to the
+   * form's image list.
+   *
+   * Uploads are settled independently rather than with `Promise.all`, so one
+   * bad file does not discard the images that uploaded fine alongside it — the
+   * admin keeps what succeeded and is told exactly which files failed and why.
+   */
+  const uploadImages = useMutation({
+    mutationFn: async (files: File[]) => {
+      const rejected: string[] = [];
+      const accepted: File[] = [];
+      for (const file of files) {
+        const reason = rejectionReason(file);
+        if (reason) rejected.push(reason);
+        else accepted.push(file);
+      }
+
+      setPendingUploads(accepted.length);
+      try {
+        const results = await Promise.allSettled(
+          accepted.map((file) => adminApi.products.uploadImage(token!, file))
+        );
+
+        const uploaded = results.flatMap((result, i) =>
+          result.status === "fulfilled"
+            ? [
+                {
+                  url: result.value.url,
+                  publicId: result.value.publicId,
+                  // Filename minus extension is a better starting alt text than
+                  // an empty box, and the admin can refine it in place.
+                  alt: accepted[i].name.replace(/\.[^.]+$/, ""),
+                },
+              ]
+            : []
+        );
+
+        const failed = results.flatMap((result, i) =>
+          result.status === "rejected"
+            ? [`"${accepted[i].name}": ${result.reason instanceof Error ? result.reason.message : "tải lên thất bại"}`]
+            : []
+        );
+
+        return { uploaded, problems: [...rejected, ...failed] };
+      } finally {
+        setPendingUploads(0);
+      }
+    },
+    onSuccess: ({ uploaded, problems }) => {
+      for (const image of uploaded) imageFields.append(image);
+      if (uploaded.length > 0) toast.success(`Đã tải lên ${uploaded.length} ảnh`);
+      for (const problem of problems) toast.error(problem);
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Tải ảnh lên thất bại"),
+  });
 
   const saveMutation = useMutation({
     mutationFn: (values: ProductFormValues) => {
@@ -319,44 +502,96 @@ export function ProductForm({ product }: { product?: Product }) {
         </section>
 
         <section className="rounded-2xl border border-border p-5">
-          <div className="mb-3 flex items-center justify-between">
+          <div className="mb-1 flex items-center justify-between">
             <h2 className="font-heading text-lg font-medium">Hình ảnh</h2>
-            <Button type="button" variant="outline" size="sm" className="rounded-full" onClick={() => imageFields.append({ url: "", alt: "" })}>
-              <Plus className="size-4" /> Thêm ảnh
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="rounded-full"
+              onClick={() => imageFields.append({ url: "", alt: "", publicId: "" })}
+            >
+              <Plus className="size-4" /> Dán URL
             </Button>
           </div>
-          <div className="flex flex-col gap-3">
+          <p className="mb-4 text-xs text-muted-foreground">
+            Ảnh đầu tiên là ảnh đại diện hiển thị ở trang danh sách và giỏ hàng. JPEG, PNG, WEBP hoặc AVIF, tối đa{" "}
+            {MAX_IMAGE_MB}MB mỗi ảnh.
+          </p>
+
+          <ImageDropzone
+            disabled={uploadImages.isPending}
+            pendingCount={pendingUploads}
+            onFilesSelected={(files) => uploadImages.mutate(files)}
+          />
+
+          <div className="mt-4 flex flex-col gap-3">
             {imageFields.fields.map((field, index) => (
-              <div key={field.id} className="flex items-start gap-2">
-                <FormField
-                  control={form.control}
-                  name={`images.${index}.url`}
-                  render={({ field }) => (
-                    <FormItem className="flex-1">
-                      <FormControl>
-                        <Input placeholder="https://..." {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name={`images.${index}.alt`}
-                  render={({ field }) => (
-                    <FormItem className="flex-1">
-                      <FormControl>
-                        <Input placeholder="Mô tả ảnh (alt text)" {...field} />
-                      </FormControl>
-                    </FormItem>
-                  )}
-                />
-                <Button type="button" variant="ghost" size="icon-sm" onClick={() => imageFields.remove(index)}>
-                  <Trash2 className="size-4" />
-                </Button>
+              <div key={field.id} className="flex items-start gap-3 rounded-xl border border-border p-3">
+                <ImageThumb url={form.watch(`images.${index}.url`)} isPrimary={index === 0} />
+
+                <div className="flex flex-1 flex-col gap-2">
+                  <FormField
+                    control={form.control}
+                    name={`images.${index}.url`}
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormControl>
+                          <Input placeholder="https://..." {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name={`images.${index}.alt`}
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormControl>
+                          <Input placeholder="Mô tả ảnh (alt text) — tốt cho SEO và trình đọc màn hình" {...field} />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    title="Di chuyển lên"
+                    disabled={index === 0}
+                    onClick={() => imageFields.move(index, index - 1)}
+                  >
+                    <ArrowUp className="size-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    title="Di chuyển xuống"
+                    disabled={index === imageFields.fields.length - 1}
+                    onClick={() => imageFields.move(index, index + 1)}
+                  >
+                    <ArrowDown className="size-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    title="Xoá khỏi sản phẩm"
+                    onClick={() => imageFields.remove(index)}
+                  >
+                    <Trash2 className="size-4" />
+                  </Button>
+                </div>
               </div>
             ))}
-            {imageFields.fields.length === 0 && <p className="text-sm text-muted-foreground">Chưa có ảnh nào.</p>}
+            {imageFields.fields.length === 0 && !uploadImages.isPending && (
+              <p className="text-sm text-muted-foreground">Chưa có ảnh nào.</p>
+            )}
           </div>
         </section>
 

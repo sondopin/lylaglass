@@ -1,3 +1,4 @@
+import { cache } from "react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { categoriesApi } from "@/lib/api/categories";
@@ -11,6 +12,13 @@ import { PaginationControls } from "@/components/product/pagination-controls";
 type Params = Promise<{ slug: string }>;
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
 
+/**
+ * Deduplicates the category lookup across `generateMetadata` and the page body,
+ * which Next.js runs as two separate calls for the same request. Without this
+ * the same category is fetched twice per render.
+ */
+const loadCategory = cache((slug: string) => categoriesApi.getBySlug(slug));
+
 export async function generateStaticParams() {
   const categories = await categoriesApi.list().catch(() => []);
   return categories.map((c) => ({ slug: c.slug }));
@@ -18,7 +26,7 @@ export async function generateStaticParams() {
 
 export async function generateMetadata({ params }: { params: Params }): Promise<Metadata> {
   try {
-    const category = await categoriesApi.getBySlug((await params).slug);
+    const category = await loadCategory((await params).slug);
     return {
       title: category.seoTitle || category.name,
       description: category.seoDescription || category.description,
@@ -31,21 +39,23 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
 }
 
 export default async function CategoryPage({ params, searchParams }: { params: Params; searchParams: SearchParams }) {
-  const { slug } = await params;
-  const sp = await searchParams;
-
-  let category;
-  try {
-    category = await categoriesApi.getBySlug(slug);
-  } catch (err) {
-    if (err instanceof ApiClientError && err.status === 404) notFound();
-    throw err;
-  }
+  const [{ slug }, sp] = await Promise.all([params, searchParams]);
 
   const page = Number(sp.page ?? 1) || 1;
   const sort = (sp.sort as ProductListFilters["sort"]) ?? "featured";
 
-  const { items, total, totalPages } = await productsApi.list({ category: slug, page, sort, limit: 12 });
+  // The product list is filtered by category *slug*, not by the category's id,
+  // so it does not depend on the category lookup — the two requests are issued
+  // together instead of one after the other.
+  const [category, productPage] = await Promise.all([
+    loadCategory(slug).catch((err) => {
+      if (err instanceof ApiClientError && err.status === 404) notFound();
+      throw err;
+    }),
+    productsApi.list({ category: slug, page, sort, limit: 12 }),
+  ]);
+
+  const { items, total, totalPages } = productPage;
 
   return (
     <>

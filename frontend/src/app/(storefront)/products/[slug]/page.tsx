@@ -1,3 +1,4 @@
+import { Suspense, cache } from "react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { productsApi } from "@/lib/api/products";
@@ -11,13 +12,35 @@ import { ProductGrid } from "@/components/product/product-grid";
 
 type Params = Promise<{ slug: string }>;
 
-async function loadProduct(slug: string) {
+/**
+ * Deduplicates the product lookup across `generateMetadata` and the page body,
+ * which Next.js runs as two separate calls for the same request. Without this
+ * the same product is fetched twice per render.
+ */
+const loadProduct = cache(async (slug: string) => {
   try {
     return await productsApi.getBySlug(slug);
   } catch (err) {
     if (err instanceof ApiClientError && err.status === 404) notFound();
     throw err;
   }
+});
+
+/**
+ * Reviews are fetched by product id, so they genuinely cannot be requested in
+ * parallel with the product — the id is only known once the product arrives.
+ *
+ * Rather than making the whole page wait for that second round trip, the
+ * reviews render as their own streamed segment: the gallery, price and
+ * add-to-cart button reach the browser as soon as the product does, and the
+ * reviews fill in a moment later.
+ */
+async function ReviewsPanel({ productId }: { productId: string }) {
+  const { reviews, summary } = await reviewsApi
+    .listForProduct(productId)
+    .catch(() => ({ reviews: [], summary: { average: 0, count: 0 } }));
+
+  return <ReviewsSection productId={productId} reviews={reviews} summary={summary} />;
 }
 
 export async function generateMetadata({ params }: { params: Params }): Promise<Metadata> {
@@ -44,7 +67,6 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
 export default async function ProductDetailPage({ params }: { params: Params }) {
   const { slug } = await params;
   const { product, related } = await loadProduct(slug);
-  const { reviews, summary } = await reviewsApi.listForProduct(product._id).catch(() => ({ reviews: [], summary: { average: 0, count: 0 } }));
 
   const minPrice = Math.min(...product.variants.map((v) => v.price));
   const inStock = product.variants.some((v) => v.inventoryQty > 0);
@@ -57,9 +79,12 @@ export default async function ProductDetailPage({ params }: { params: Params }) 
     image: product.images.map((i) => i.url),
     sku: product.variants[0]?.sku,
     brand: { "@type": "Brand", name: "LylaGlass" },
+    // Taken from the denormalised counters on the product rather than from the
+    // reviews response — that is exactly what they exist for, and it keeps the
+    // structured data out of the reviews request's critical path.
     aggregateRating:
-      summary.count > 0
-        ? { "@type": "AggregateRating", ratingValue: summary.average, reviewCount: summary.count }
+      product.reviewCount > 0
+        ? { "@type": "AggregateRating", ratingValue: product.ratingAverage, reviewCount: product.reviewCount }
         : undefined,
     offers: {
       "@type": "Offer",
@@ -84,7 +109,13 @@ export default async function ProductDetailPage({ params }: { params: Params }) 
       </div>
 
       <div className="mx-auto max-w-2xl">
-        <ReviewsSection productId={product._id} reviews={reviews} summary={summary} />
+        <Suspense
+          fallback={
+            <div className="py-10 text-sm text-muted-foreground">Đang tải đánh giá...</div>
+          }
+        >
+          <ReviewsPanel productId={product._id} />
+        </Suspense>
       </div>
 
       {related.length > 0 && (

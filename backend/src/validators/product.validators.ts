@@ -15,6 +15,8 @@ export const imageInputSchema = z.object({
   url: z.string().url(),
   alt: z.string().optional(),
   position: z.number().int().optional(),
+  /** Set by the upload endpoint; absent when an external URL was pasted in. */
+  publicId: z.string().optional(),
 });
 
 export const createProductSchema = z.object({

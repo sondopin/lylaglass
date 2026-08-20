@@ -5,6 +5,13 @@ const imageSchema = new Schema(
     url: { type: String, required: true },
     alt: { type: String, default: "" },
     position: { type: Number, default: 0 },
+    /**
+     * Cloudinary asset id, present only for images uploaded through the admin.
+     * Stored because the delivery URL alone is not enough to delete the asset
+     * later — without it, every replaced image would be orphaned in storage
+     * forever. Empty for images added by pasting an external URL.
+     */
+    publicId: { type: String, default: "" },
   },
   { _id: false }
 );
