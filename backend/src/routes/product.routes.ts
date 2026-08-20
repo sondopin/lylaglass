@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { validate } from "@/middlewares/validate";
 import { requireAdmin } from "@/middlewares/adminAuth";
+import { requireCsrf } from "@/middlewares/csrf";
 import { uploadSingleImage } from "@/middlewares/upload";
 import {
   createProductSchema,
@@ -31,10 +32,17 @@ router.get("/:slug", getProductBySlug);
 router.get("/:productId/reviews", getProductReviews);
 router.post("/:productId/reviews", validate({ body: createReviewSchema }), createReview);
 
-router.post("/", requireAdmin, validate({ body: createProductSchema }), createProduct);
-router.patch("/:id", requireAdmin, validate({ body: updateProductSchema }), updateProduct);
-router.delete("/:id", requireAdmin, deleteProduct);
-router.patch("/:id/inventory", requireAdmin, validate({ body: updateInventorySchema }), updateProductInventory);
-router.post("/upload-image", requireAdmin, uploadSingleImage, uploadProductImage);
+router.post("/", requireAdmin, requireCsrf, validate({ body: createProductSchema }), createProduct);
+router.patch("/:id", requireAdmin, requireCsrf, validate({ body: updateProductSchema }), updateProduct);
+router.delete("/:id", requireAdmin, requireCsrf, deleteProduct);
+router.patch(
+  "/:id/inventory",
+  requireAdmin,
+  requireCsrf,
+  validate({ body: updateInventorySchema }),
+  updateProductInventory
+);
+// CSRF header coexists with multipart form data without conflict.
+router.post("/upload-image", requireAdmin, requireCsrf, uploadSingleImage, uploadProductImage);
 
 export default router;

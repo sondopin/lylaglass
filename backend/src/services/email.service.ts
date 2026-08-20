@@ -186,9 +186,14 @@ export async function sendPaymentConfirmationEmail(order: OrderRecord, payment: 
   return result;
 }
 
+/**
+ * The admin app is a separate origin from the storefront (see `env.adminUrl`),
+ * and its routes lost the `/admin` prefix once they became that app's own
+ * root — so this is deliberately `env.adminUrl`, not `env.storefrontUrl`.
+ */
 function adminOrderUrl(order: OrderRecord): string {
-  const base = env.storefrontUrl.replace(/\/$/, "");
-  return `${base}/admin/orders/${String(order._id)}`;
+  const base = env.adminUrl.replace(/\/$/, "");
+  return `${base}/orders/${String(order._id)}`;
 }
 
 /**

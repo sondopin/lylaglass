@@ -51,9 +51,30 @@ export function validateRuntimeConfig() {
     );
   }
 
+  // A secret still equal to its committed dev fallback is, in production, no
+  // secret at all — anyone who has read this source file knows it. JWT_SECRET
+  // signs the admin session; CSRF_SECRET is what makes the CSRF token
+  // unguessable (see utils/csrf.ts). Either one left at the default silently
+  // turns "signed" into "attacker-forgeable."
+  if (env.jwtSecret === "dev-only-insecure-secret-change-me") problems.push("JWT_SECRET");
+  if (env.csrfSecret === "dev-only-insecure-csrf-secret-change-me") problems.push("CSRF_SECRET");
+
+  // Left at the local-dev defaults in production, the API would only ever
+  // accept CORS requests from `localhost` — meaning the deployed admin app
+  // could never call it at all, and every deployed request would fail with a
+  // CORS error before reaching any route handler. This is not a security
+  // *hole* like the two checks above, but it is a total functionality break,
+  // so it gets the same fail-fast treatment.
+  const usingDevDefaults =
+    env.corsOrigins.length === 2 &&
+    env.corsOrigins.includes("http://localhost:3000") &&
+    env.corsOrigins.includes("http://localhost:3001");
+  if (usingDevDefaults) problems.push("CORS_ORIGINS");
+  if (env.adminUrl === "http://localhost:3001") problems.push("ADMIN_URL");
+
   if (problems.length === 0) return;
 
-  const message = `Cấu hình thanh toán chưa hoàn chỉnh, thiếu: ${problems.join(", ")}`;
+  const message = `Cấu hình chưa hoàn chỉnh cho production, thiếu hoặc còn giá trị mặc định của dev: ${problems.join(", ")}`;
   if (env.isProduction) throw new Error(message);
   logger.warn({ missing: problems }, message);
 }

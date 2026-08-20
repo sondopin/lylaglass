@@ -7,6 +7,8 @@ import { AdminUserModel } from "@/models/AdminUser.model";
 export interface AdminAuthPayload {
   sub: string;
   role: "owner" | "staff";
+  /** Random per-login id — also the CSRF token's key material (see utils/csrf.ts). */
+  jti: string;
 }
 
 declare global {
@@ -18,12 +20,17 @@ declare global {
   }
 }
 
+/**
+ * Reads the session from the httpOnly `admin_token` cookie rather than an
+ * `Authorization` header — the admin app never sees the raw JWT at all, so
+ * there is nothing for an XSS on it (or anywhere else) to read out of
+ * `localStorage`/`document.cookie` and exfiltrate.
+ */
 export async function requireAdmin(req: Request, _res: Response, next: NextFunction) {
   try {
-    const header = req.headers.authorization;
-    if (!header?.startsWith("Bearer ")) throw ApiError.unauthorized();
+    const token = req.cookies?.[env.adminCookie.name];
+    if (!token) throw ApiError.unauthorized();
 
-    const token = header.slice("Bearer ".length);
     const payload = jwt.verify(token, env.jwtSecret) as AdminAuthPayload;
 
     const admin = await AdminUserModel.findById(payload.sub).lean();
@@ -33,7 +40,7 @@ export async function requireAdmin(req: Request, _res: Response, next: NextFunct
     next();
   } catch (err) {
     if (err instanceof ApiError) return next(err);
-    next(ApiError.unauthorized("Token không hợp lệ hoặc đã hết hạn"));
+    next(ApiError.unauthorized("Phiên đăng nhập không hợp lệ hoặc đã hết hạn"));
   }
 }
 

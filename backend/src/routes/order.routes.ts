@@ -2,6 +2,7 @@ import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { validate } from "@/middlewares/validate";
 import { requireAdmin } from "@/middlewares/adminAuth";
+import { requireCsrf } from "@/middlewares/csrf";
 import { lookupOrderQuerySchema, updateOrderStatusSchema, listOrdersQuerySchema } from "@/validators/order.validators";
 import { paymentStatusQuerySchema } from "@/validators/payment.validators";
 import {
@@ -40,7 +41,13 @@ router.get(
 
 router.get("/admin/all", requireAdmin, validate({ query: listOrdersQuerySchema }), listAdminOrders);
 router.get("/admin/:id", requireAdmin, getAdminOrderById);
-router.patch("/admin/:id/status", requireAdmin, validate({ body: updateOrderStatusSchema }), updateAdminOrderStatus);
-router.post("/admin/:id/cancel", requireAdmin, cancelAdminOrder);
+router.patch(
+  "/admin/:id/status",
+  requireAdmin,
+  requireCsrf,
+  validate({ body: updateOrderStatusSchema }),
+  updateAdminOrderStatus
+);
+router.post("/admin/:id/cancel", requireAdmin, requireCsrf, cancelAdminOrder);
 
 export default router;

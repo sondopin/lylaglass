@@ -7,8 +7,10 @@ export default function robots(): MetadataRoute.Robots {
     rules: [
       {
         userAgent: "*",
+        // `/admin` dropped: the admin panel now lives on its own app/domain
+        // entirely (frontend-admin/), which has its own robots.ts.
         allow: "/",
-        disallow: ["/admin", "/cart", "/checkout", "/orders", "/api"],
+        disallow: ["/cart", "/checkout", "/orders", "/api"],
       },
     ],
     sitemap: `${SITE_URL}/sitemap.xml`,

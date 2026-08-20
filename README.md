@@ -12,10 +12,17 @@ Tái tạo theo cấu trúc/pattern quan sát được trong `REFERENCE_ANALYSIS
 
 ```
 LylaGlass/
-├── backend/     Express + TypeScript + MongoDB (Mongoose) — REST API
-├── frontend/    Next.js (App Router) + TypeScript + Tailwind + shadcn/ui
+├── backend/         Express + TypeScript + MongoDB (Mongoose) — REST API
+├── frontend/        Next.js (App Router) — storefront, public, không auth
+├── frontend-admin/  Next.js (App Router) — trang quản trị, app RIÊNG, domain RIÊNG
 └── docker-compose.yml   Mongo + backend, cho môi trường local/staging
 ```
+
+`frontend-admin/` là app độc lập (không phải route `/admin` bên trong
+`frontend/` nữa), dự kiến deploy lên subdomain riêng (vd `admin.lylaglass.com`)
+— tách khỏi storefront để một lỗ hổng XSS trên storefront (vd nội dung review
+chưa lọc kỹ) không thể chạm tới phiên đăng nhập admin. Xem mục **Xác thực
+admin** bên dưới.
 
 Backend theo mô hình **Controller → Service → Repository**:
 - `controllers/` chỉ nhận request, gọi service, trả response.
@@ -62,7 +69,7 @@ Nếu MongoDB không hỗ trợ transaction: production **từ chối khởi đ�
 
 ```bash
 cd backend
-cp .env.example .env   # điền JWT_SECRET, ADMIN_SEED_PASSWORD,
+cp .env.example .env   # điền JWT_SECRET, CSRF_SECRET, ADMIN_SEED_PASSWORD,
                        # VIETQR_ACCOUNT_NUMBER, BANK_WEBHOOK_SECRET...
 npm install
 npm run seed            # tạo admin, danh mục, sản phẩm mẫu
@@ -71,9 +78,10 @@ npm test                 # chạy test (Vitest)
 ```
 
 > Thiếu biến thanh toán bắt buộc: ở dev backend chỉ log cảnh báo, ở
-> production sẽ **không khởi động** (xem `config/validateConfig.ts`).
+> production sẽ **không khởi động** (xem `config/validateConfig.ts`). Cùng quy
+> tắc áp dụng cho `JWT_SECRET`/`CSRF_SECRET` còn để giá trị mặc định của dev.
 
-### 3. Frontend
+### 3. Frontend (storefront)
 
 ```bash
 cd frontend
@@ -82,13 +90,22 @@ npm install
 npm run dev               # http://localhost:3000
 ```
 
-> Trên Windows, nếu Turbopack báo lỗi spawn process khi biên dịch
-> `globals.css`, chạy `npm run dev` (đã cấu hình dùng `next dev --webpack`)
-> để dùng webpack thay Turbopack.
+### 4. Frontend-admin (trang quản trị — app riêng)
 
-### 4. Đăng nhập quản trị
+```bash
+cd frontend-admin
+cp .env.example .env.local
+npm install
+npm run dev               # http://localhost:3001
+```
 
-Truy cập `http://localhost:3000/admin/login` với thông tin đã đặt ở
+Chạy song song với backend + frontend để mô phỏng đúng tình huống "khác
+origin" ngay ở local — CORS/cookie/CSRF hoạt động y hệt lúc deploy thật (chỉ
+khác domain, không khác cơ chế).
+
+### 5. Đăng nhập quản trị
+
+Truy cập `http://localhost:3001/login` với thông tin đã đặt ở
 `ADMIN_SEED_EMAIL` / `ADMIN_SEED_PASSWORD` trong `backend/.env`.
 
 **Nếu báo "Email hoặc mật khẩu không đúng"**: `npm run seed` chỉ tạo admin khi
@@ -107,6 +124,46 @@ Có thể ghi đè bằng `--email=<địa chỉ>` và `--password=<mật khẩu
 bao giờ in mật khẩu ra log. `--reset` cũng bật lại `isActive` — một tài khoản bị
 vô hiệu hoá sẽ trượt đăng nhập trước cả khi mật khẩu được kiểm tra, nên nếu
 không bật lại thì "đặt lại mật khẩu" trông như không có tác dụng.
+
+## Xác thực admin: httpOnly cookie + CSRF (không còn localStorage)
+
+Trước đây token admin là JWT lưu trong `localStorage` qua header
+`Authorization: Bearer`. Rủi ro: `localStorage` chỉ cô lập theo **origin**, nên
+storefront và admin từng chung 1 domain nghĩa là một XSS trên storefront (vd
+nội dung review chưa lọc kỹ) đọc được thẳng token admin.
+
+Cơ chế mới:
+
+- **Phiên đăng nhập nằm trong cookie `admin_token`**: `HttpOnly` (JS không đọc
+  được, kể cả từ chính app admin), `Secure` ở production, `SameSite=Lax`,
+  **host-only** (không set `Domain` — xem lý do trong
+  `backend/src/config/env.ts`). `frontend-admin/` không lưu token ở bất kỳ đâu
+  trong JS — không `localStorage`, không `document.cookie`.
+- **CSRF được chống bằng synchronizer token, không phải double-submit
+  cookie**: token CSRF được suy ra từ `sub + jti` của JWT bằng HMAC (xem
+  `backend/src/utils/csrf.ts`), trả về **trong JSON body** của
+  `POST /admin/auth/login` và `GET /admin/auth/me` — không phải qua cookie.
+  Lý do chọn cách này thay vì double-submit cookie kinh điển: double-submit
+  cookie đòi hỏi cookie CSRF phải **đọc được bằng JS của app admin**, và cách
+  duy nhất để làm vậy mà không cần cùng origin với API là set `Domain` rộng ra
+  cả domain cha — nhưng làm vậy thì storefront (cùng domain cha) cũng đọc
+  được cookie đó nếu dính XSS, gần như phá mất lý do tách domain ngay từ đầu.
+  Với synchronizer token, storefront dù kích hoạt được request (cookie tự
+  đính kèm vì cùng site) cũng không thể đọc được response (bị chặn bởi CORS,
+  vì storefront không nằm trong whitelist origin được phép gửi credentials
+  tới các endpoint này) — nên không bao giờ lấy được giá trị token để giả
+  mạo.
+  `frontend-admin/` giữ token này trong biến JS ở bộ nhớ (`lib/csrf.ts`), gắn
+  vào header `X-CSRF-Token` cho mọi request POST/PATCH/DELETE.
+- **`POST /admin/auth/logout`** xoá cookie phía server (JS không tự xoá được
+  cookie `HttpOnly`).
+- **CORS chuyển từ 1 origin sang whitelist nhiều origin**
+  (`CORS_ORIGINS` trong `backend/.env`, mặc định gồm cả `:3000` và `:3001` khi
+  dev), luôn `credentials: true`, không bao giờ reflect origin không nằm
+  trong whitelist.
+
+**Không đổi gì** với luồng khách hàng: guest checkout, giỏ hàng, tra cứu đơn —
+không có cookie, không có CSRF, hoạt động y như trước.
 
 ## Thanh toán: VietQR → TPBank → webhook
 
@@ -189,12 +246,13 @@ curl -X POST http://localhost:4000/api/payments/bank-webhook \
 
 ## Kiểm tra đã thực hiện
 
-- `npm test` (backend, Vitest): **104 test**.
+- `npm test` (backend, Vitest): **134 test**.
   - Unit (repository được stub, không cần DB): sinh VietQR đối chiếu vector
     tham chiếu NAPAS, xác thực webhook SePay (HMAC/API key/replay), toàn bộ
     quy tắc đối soát (sai số tiền, sai nội dung, sai tài khoản, webhook trùng,
     hết hạn, hoàn kho/coupon, email gửi đúng một lần), dựng MIME + mã hoá
-    tiếng Việt + chặn header injection, cache access token của Gmail.
+    tiếng Việt + chặn header injection, cache access token của Gmail, mapping
+    lỗi upload ảnh.
   - Integration (`tests/integration/`, chạy trên replica set thật, tự bỏ qua
     nếu không kết nối được): xác nhận transaction thật sự hoạt động và
     **kiểm chứng bằng chạy song song**:
@@ -204,6 +262,13 @@ curl -X POST http://localhost:4000/api/payments/bank-webhook \
       `usageCount` bằng đúng 2, 4 đơn thất bại không tiêu kho.
     - Checkout lỗi giữa chừng → không để lại gì: 0 Order, 0 Payment, kho
       nguyên vẹn.
+    - **Auth cookie + CSRF qua HTTP thật** (`adminAuth.integration.test.ts`,
+      20 test dùng `supertest` gọi thẳng app thật): thuộc tính cookie
+      (`HttpOnly`/`SameSite=Lax`/host-only/`Max-Age` đúng `JWT_EXPIRES_IN`),
+      login không trả `token` trong body, mutating route từ chối khi thiếu
+      hoặc sai `X-CSRF-Token`, CSRF token của phiên A không dùng được cho
+      phiên B, logout xoá cookie, CORS chỉ reflect origin trong whitelist,
+      route công khai (storefront) không bị ảnh hưởng.
 - Race-condition tồn kho: trừ kho bằng `findOneAndUpdate` atomic theo từng SKU
   (điều kiện `inventoryQty >= quantity` nằm trong filter), toàn bộ nằm trong
   transaction; hoàn kho/coupon qua atomic claim nên không bao giờ chạy hai lần.

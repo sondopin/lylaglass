@@ -10,6 +10,10 @@ vi.mock("@/config/env", () => ({
     nodeEnv: "test",
     isProduction: false,
     storefrontUrl: "https://lylaglass.vn",
+    // The admin app is its own origin, separate from the storefront (see
+    // config/env.ts) — the "new paid order" email links here, not under
+    // storefrontUrl/admin/....
+    adminUrl: "https://admin.lylaglass.vn",
     payment: {
       provider: "vietqr",
       ttlMinutes: TTL_MINUTES,
@@ -268,8 +272,9 @@ describe("shop owner notification email", () => {
     // Reconciliation data.
     expect(email.text).toContain("92704");
     expect(email.text).toContain("FT26012345678");
-    // Straight into the admin screen for this order.
-    expect(email.text).toContain(`/admin/orders/${String(paidOrder._id)}`);
+    // Straight into the admin app's own screen for this order (its own
+    // origin now, so no `/admin` prefix).
+    expect(email.text).toContain(`https://admin.lylaglass.vn/orders/${String(paidOrder._id)}`);
   });
 
   it("surfaces the customer note and a manual-review warning when present", () => {

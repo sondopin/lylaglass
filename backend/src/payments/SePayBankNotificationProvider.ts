@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { ApiError } from "@/utils/ApiError";
 import { logger } from "@/config/logger";
+import { safeEqual } from "@/utils/safeEqual";
 import { sePayWebhookSchema } from "@/validators/payment.validators";
 import { BankNotificationProvider, BankTransactionEvent } from "./BankNotificationProvider";
 
@@ -23,18 +24,6 @@ function headerValue(headers: Record<string, string | string[] | undefined>, nam
   const raw = headers[name] ?? headers[name.toLowerCase()];
   if (Array.isArray(raw)) return raw[0] ?? "";
   return raw ?? "";
-}
-
-/** Length-independent constant-time compare — never short-circuits on length. */
-function safeEqual(a: string, b: string): boolean {
-  const bufA = Buffer.from(a, "utf8");
-  const bufB = Buffer.from(b, "utf8");
-  if (bufA.length !== bufB.length) {
-    // Still burn a comparison so a wrong length is not distinguishable by timing.
-    crypto.timingSafeEqual(bufA, bufA);
-    return false;
-  }
-  return crypto.timingSafeEqual(bufA, bufB);
 }
 
 /**
