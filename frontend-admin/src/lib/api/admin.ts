@@ -1,4 +1,4 @@
-import { apiClient } from "./client";
+import { apiClient, ApiClientError } from "./client";
 import { toQueryString } from "./query-string";
 import { getCsrfToken } from "@/lib/csrf";
 import {
@@ -12,6 +12,7 @@ import {
   OrderWithPayment,
   Product,
   Settings,
+  SpxExportOptions,
 } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api";
@@ -73,6 +74,37 @@ export const adminApi = {
     updateStatus: (id: string, data: Record<string, unknown>) =>
       apiClient.patch<Order>(`/orders/admin/${id}/status`, data),
     cancel: (id: string) => apiClient.post<Order>(`/orders/admin/${id}/cancel`, undefined),
+    /**
+     * Bypasses `apiClient` because the response body is the xlsx file itself,
+     * not the `{ success, data }` JSON envelope every other endpoint returns.
+     */
+    exportSpx: async (payload: {
+      orderIds?: string[];
+      filters?: Record<string, string | undefined>;
+      options: SpxExportOptions;
+    }) => {
+      const csrfToken = getCsrfToken();
+      const res = await fetch(`${API_URL}/orders/admin/export-spx`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+        },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        throw new ApiClientError(
+          json?.error?.message ?? `Yêu cầu thất bại (${res.status})`,
+          res.status,
+          json?.error?.details
+        );
+      }
+      const disposition = res.headers.get("Content-Disposition") ?? "";
+      const filename = disposition.match(/filename="?([^"]+)"?/)?.[1] ?? "spx-tao-don.xlsx";
+      return { blob: await res.blob(), filename };
+    },
   },
 
   customers: {

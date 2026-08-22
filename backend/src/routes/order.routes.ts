@@ -3,7 +3,12 @@ import rateLimit from "express-rate-limit";
 import { validate } from "@/middlewares/validate";
 import { requireAdmin } from "@/middlewares/adminAuth";
 import { requireCsrf } from "@/middlewares/csrf";
-import { lookupOrderQuerySchema, updateOrderStatusSchema, listOrdersQuerySchema } from "@/validators/order.validators";
+import {
+  lookupOrderQuerySchema,
+  updateOrderStatusSchema,
+  listOrdersQuerySchema,
+  exportSpxOrdersSchema,
+} from "@/validators/order.validators";
 import { paymentStatusQuerySchema } from "@/validators/payment.validators";
 import {
   lookupOrder,
@@ -12,6 +17,7 @@ import {
   getAdminOrderById,
   updateAdminOrderStatus,
   cancelAdminOrder,
+  exportSpxOrders,
 } from "@/controllers/order.controller";
 
 const router = Router();
@@ -49,5 +55,6 @@ router.patch(
   updateAdminOrderStatus
 );
 router.post("/admin/:id/cancel", requireAdmin, requireCsrf, cancelAdminOrder);
+router.post("/admin/export-spx", requireAdmin, requireCsrf, validate({ body: exportSpxOrdersSchema }), exportSpxOrders);
 
 export default router;

@@ -10,6 +10,29 @@ export interface OrderListFilters {
   q?: string;
 }
 
+export interface OrderFilters {
+  orderStatus?: string;
+  paymentStatus?: string;
+  shippingStatus?: string;
+  q?: string;
+}
+
+function buildOrderFilter(filters: OrderFilters): FilterQuery<Order> {
+  const query: FilterQuery<Order> = {};
+  if (filters.orderStatus) query.orderStatus = filters.orderStatus;
+  if (filters.paymentStatus) query.paymentStatus = filters.paymentStatus;
+  if (filters.shippingStatus) query.shippingStatus = filters.shippingStatus;
+  if (filters.q) {
+    query.$or = [
+      { orderNumber: { $regex: filters.q, $options: "i" } },
+      { "customer.email": { $regex: filters.q, $options: "i" } },
+      { "customer.name": { $regex: filters.q, $options: "i" } },
+      { "customer.phone": { $regex: filters.q, $options: "i" } },
+    ];
+  }
+  return query;
+}
+
 export const orderRepository = {
   /**
    * Mongoose only honours a session on `create` when the documents are passed
@@ -53,18 +76,7 @@ export const orderRepository = {
     ).lean(),
 
   async list(filters: OrderListFilters) {
-    const query: FilterQuery<Order> = {};
-    if (filters.orderStatus) query.orderStatus = filters.orderStatus;
-    if (filters.paymentStatus) query.paymentStatus = filters.paymentStatus;
-    if (filters.shippingStatus) query.shippingStatus = filters.shippingStatus;
-    if (filters.q) {
-      query.$or = [
-        { orderNumber: { $regex: filters.q, $options: "i" } },
-        { "customer.email": { $regex: filters.q, $options: "i" } },
-        { "customer.name": { $regex: filters.q, $options: "i" } },
-        { "customer.phone": { $regex: filters.q, $options: "i" } },
-      ];
-    }
+    const query = buildOrderFilter(filters);
     const skip = (filters.page - 1) * filters.limit;
     const [items, total] = await Promise.all([
       OrderModel.find(query).sort({ createdAt: -1 }).skip(skip).limit(filters.limit).lean(),
@@ -72,6 +84,11 @@ export const orderRepository = {
     ]);
     return { items, total };
   },
+
+  /** Every order matching the given filters, unpaginated — used to build the SPX export. */
+  findAllByFilters: (filters: OrderFilters) => OrderModel.find(buildOrderFilter(filters)).sort({ createdAt: -1 }).lean(),
+
+  findManyByIds: (ids: string[]) => OrderModel.find({ _id: { $in: ids } }).sort({ createdAt: -1 }).lean(),
 
   countAll: () => OrderModel.countDocuments(),
 

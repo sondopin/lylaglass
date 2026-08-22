@@ -61,3 +61,28 @@ export const listOrdersQuerySchema = z.object({
   shippingStatus: z.string().optional(),
   q: z.string().optional(),
 });
+
+const orderExportFiltersSchema = z.object({
+  orderStatus: z.string().optional(),
+  paymentStatus: z.string().optional(),
+  shippingStatus: z.string().optional(),
+  q: z.string().optional(),
+});
+
+export const exportSpxOrdersSchema = z
+  .object({
+    orderIds: z.array(z.string()).min(1).optional(),
+    filters: orderExportFiltersSchema.optional(),
+    options: z
+      .object({
+        defaultWeightPerItemKg: z.coerce.number().min(0.01).max(50).default(0.5),
+        allowPartialDelivery: z.boolean().default(false),
+        allowTryOn: z.boolean().default(false),
+        allowViewNoTry: z.boolean().default(true),
+        highValueThreshold: z.coerce.number().min(0).default(3_000_000),
+      })
+      .default({}),
+  })
+  .refine((data) => (data.orderIds && data.orderIds.length > 0) || data.filters, {
+    message: "Cần chọn ít nhất một đơn hàng hoặc chọn tất cả đơn theo bộ lọc",
+  });

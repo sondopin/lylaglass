@@ -48,6 +48,10 @@ function corsMiddleware(): RequestHandler {
       callback(new Error(`Origin không được phép (credentialed): ${origin}`));
     },
     credentials: true,
+    // `Content-Disposition` isn't one of the CORS-safelisted response headers
+    // browsers expose to JS by default — without this, the SPX export
+    // endpoint's suggested filename would be invisible to `fetch`.
+    exposedHeaders: ["Content-Disposition"],
   });
 
   const publicCors = cors({

@@ -224,6 +224,15 @@ export interface OrderWithPayment extends Order {
   payment: AdminPayment | null;
 }
 
+/** Business-policy defaults filled into every row of the SPX bulk-import file. */
+export interface SpxExportOptions {
+  defaultWeightPerItemKg: number;
+  allowPartialDelivery: boolean;
+  allowTryOn: boolean;
+  allowViewNoTry: boolean;
+  highValueThreshold: number;
+}
+
 export interface Review {
   _id: string;
   productId: string;
