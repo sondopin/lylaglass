@@ -19,7 +19,7 @@ function cookieOptions(): CookieOptions {
   return {
     httpOnly: true,
     secure: env.isProduction,
-    sameSite: "lax",
+    sameSite: env.isProduction ? "none" : "lax",
     path: "/",
     ...(env.adminCookie.domain ? { domain: env.adminCookie.domain } : {}),
   };
