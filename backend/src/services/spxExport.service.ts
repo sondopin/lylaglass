@@ -83,7 +83,7 @@ function buildRows(order: OrderRecord, options: SpxExportOptions): unknown[][] {
     "",
     "",
     "",
-    order.customer.customerId ? String(order.customer.customerId) : "",
+    order.customer?.customerId ? String(order.customer.customerId) : "",
     order.total,
     yn(options.allowPartialDelivery),
     yn(options.allowTryOn),
